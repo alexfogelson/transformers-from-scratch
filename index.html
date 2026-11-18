@@ -1,0 +1,2907 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Inside a transformer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#EDF0F4; --surface:#FFFFFF; --ink:#172033; --muted:#596378; --rule:#CBD2DC;
+  --accent:#2F49D1; --accent-ink:#FFFFFF; --hl:#E1920C; --hl-soft:#FCEBC8;
+  --chip:#E2E6EC; --chip-b:#B5BECB; --wall:#8A94A8;
+  --tl:86%; --ts:72%; --bl:56%; --bs:46%; --pl:52%;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#11161F; --surface:#19202D; --ink:#E3E8F1; --muted:#97A2B6; --rule:#2D3647;
+    --accent:#8C9EFF; --accent-ink:#0F1424; --hl:#F4B548; --hl-soft:#3E3117;
+    --chip:#252D3C; --chip-b:#3F4A5E; --wall:#5D687E;
+    --tl:27%; --ts:38%; --bl:50%; --bs:42%; --pl:62%;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#11161F; --surface:#19202D; --ink:#E3E8F1; --muted:#97A2B6; --rule:#2D3647;
+  --accent:#8C9EFF; --accent-ink:#0F1424; --hl:#F4B548; --hl-soft:#3E3117;
+  --chip:#252D3C; --chip-b:#3F4A5E; --wall:#5D687E;
+  --tl:27%; --ts:38%; --bl:50%; --bs:42%; --pl:62%;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Familjen Grotesk",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:17px;line-height:1.55}
+.tok,input[type=text],.ids-out{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.wrap{max-width:1100px;margin:0 auto;padding:0 clamp(16px,4vw,40px)}
+header{padding:36px 0 8px}
+h1{font-size:clamp(2rem,4.5vw,3rem);line-height:1.05;margin:0;font-weight:700;letter-spacing:-.02em}
+.sub{margin:.35rem 0 0;color:var(--muted)}
+input[type=text]{font-size:.92rem;color:var(--ink);background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:.5em .7em;width:100%}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn{font:inherit;font-size:.95rem;padding:.5em .95em;border-radius:8px;border:1px solid var(--rule);background:var(--surface);color:var(--ink);cursor:pointer;white-space:nowrap}
+.btn:hover:not(:disabled){border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.caption{margin:26px 0 14px;min-height:7.5em}
+.stepno{color:var(--muted);font-size:.92rem;margin:0}
+.caption h2{font-size:clamp(1.5rem,3vw,2rem);line-height:1.15;margin:.15em 0 .35em;font-weight:600;letter-spacing:-.015em}
+.caption p{margin:0 0 .5em;max-width:68ch}
+.caption .aside{color:var(--muted);font-size:.93rem}
+.canvas{background:var(--surface);border:1px solid var(--rule);border-radius:14px;padding:18px clamp(14px,3vw,26px) 20px}
+.plain{display:block;width:100%;font:inherit;font-size:1rem;line-height:1.65;margin:6px 0;padding:.6em .75em;color:var(--ink);background:var(--bg);border:1px solid var(--rule);border-radius:8px;resize:vertical}
+.sent{position:relative;display:flex;flex-wrap:wrap;align-items:center;row-gap:32px;padding:20px 2px}
+.word{display:inline-flex;gap:5px}
+.sent .tok{font-size:.76rem;padding:.08em .3em;border-radius:4px}
+.wall{align-self:stretch;width:0;margin:-6px 10px;border-left:2px dashed var(--wall)}
+.tok{display:inline-flex;flex-direction:column;align-items:center;font-size:1.02rem;padding:.18em .45em;border-radius:5px;background:hsl(var(--h) var(--ts) var(--tl));border:1px solid hsl(var(--h) var(--bs) var(--bl));color:var(--ink);white-space:pre;line-height:1.3}
+.tok.base{background:var(--chip);border-color:var(--chip-b)}
+.tok sub{display:none;font-size:.62em;color:var(--muted);line-height:1.1}
+body.ids .tok sub{display:block}
+.small .tok{font-size:.8rem;padding:.08em .32em;border-radius:4px}
+.tok.fresh{animation:pop .8s ease-out}
+@keyframes pop{0%{transform:scale(1.45);box-shadow:0 0 0 5px var(--accent)}100%{transform:scale(1);box-shadow:0 0 0 0 transparent}}
+.enter .tok{animation:drop .18s both;animation-delay:var(--d)}
+@keyframes drop{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+.pair{display:inline-flex;gap:3px;padding:2px;margin:-2px;border-radius:7px;background:var(--hl-soft);box-shadow:0 0 0 2px var(--hl)}
+.br{position:absolute;height:9px;border:2px solid hsl(var(--h) 65% var(--pl));pointer-events:none;transition:opacity .3s}
+.br.above{border-bottom:0;border-radius:4px 4px 0 0}
+.br.below{border-top:0;border-radius:0 0 4px 4px}
+.br.dim{opacity:.13}
+.br.cur{border-width:3px}
+.histwrap{position:sticky;bottom:0;z-index:5;background:var(--surface);border-top:1px solid var(--rule);margin-top:6px;padding:12px 0 6px}
+.sent.dense{row-gap:28px}
+.sent.dense .word{gap:4px}
+.sent.dense .tok{font-size:.68rem;padding:.06em .24em}
+.sent.dense .wall{margin:-4px 6px}
+.histwrap h3{font-size:.98rem;font-weight:600;margin:0}
+.empty{color:var(--muted);font-size:.93rem;margin:10px 0 0}
+.hist{position:relative;display:flex;align-items:flex-end;gap:8px;overflow-x:auto;padding:14px 2px 4px}
+.bar{display:flex;flex-direction:column;align-items:center;gap:4px;flex:none;transition:opacity .3s}
+.bn{font-size:.85rem;font-variant-numeric:tabular-nums;color:var(--muted);min-height:1.3em}
+.stack{display:flex;flex-direction:column-reverse;gap:2px}
+.blk{display:block;width:30px;height:var(--bh,16px);border-radius:3px;background:hsl(var(--h) 65% var(--pl));visibility:hidden}
+.blk.on{visibility:visible}
+.bl{display:flex;flex-direction:column;align-items:center;gap:2px;padding-top:6px;border-top:2px solid var(--rule);min-width:40px}
+.bar.win .blk{box-shadow:0 0 0 2px var(--ink)}
+.bar.win .bn{color:var(--ink);font-weight:700}
+.bar.tie .blk{outline:2px dashed var(--hl);outline-offset:1px}
+.bar.lose{opacity:.35}
+.flyer{position:fixed;border-radius:3px;background:hsl(var(--h) 65% var(--pl));pointer-events:none;z-index:50}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0 0}
+.controls .spacer{flex:1}
+.toggle{display:inline-flex;gap:6px;align-items:center;font-size:.9rem;color:var(--muted);cursor:pointer}
+.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;margin:26px 0 56px}
+.panel{background:var(--surface);border:1px solid var(--rule);border-radius:12px;padding:18px}
+.panel h3{font-size:1.02rem;margin:0 0 10px;font-weight:600}
+.note{color:var(--muted);font-size:.9rem;margin:.6em 0 0}
+.rule{display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px dashed var(--rule)}
+.rule:last-child{border-bottom:0}
+.rk{flex:none;min-width:2.4em;color:var(--muted);font-size:.85rem;font-variant-numeric:tabular-nums}
+.chips{display:flex;flex-wrap:wrap;gap:3px;align-items:center}
+.plus{color:var(--muted);margin:0 3px}
+.mathsec{margin-top:30px}
+.ms-h{font-size:1.35rem;font-weight:600;margin:.1em 0 .3em;line-height:1.2}
+.ms-text{max-width:72ch;margin:0 0 12px}
+.cell{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.82rem;padding:.25em .4em;background:var(--bg);border-radius:4px;min-width:3.7em;text-align:center;font-variant-numeric:tabular-nums}
+#n3{display:block;width:100%;max-width:680px;height:auto;margin:0 auto;touch-action:none;cursor:grab;user-select:none}
+#n3:active{cursor:grabbing}
+.n3-t{paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round}
+.n3-t.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.n3-note{text-align:center;max-width:70ch;margin:4px auto 0}
+body{padding-left:48px}
+.stop{min-height:100vh;min-height:100dvh;padding-top:8px}
+.rail{position:fixed;left:0;top:0;bottom:0;width:48px;z-index:60;background:var(--surface);border-right:1px solid var(--rule);overflow:hidden;transition:width .18s ease,box-shadow .18s;padding:calc(14px + env(safe-area-inset-top,0px)) 0 calc(14px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:2px}
+.rail:hover,.rail.open{width:260px;box-shadow:6px 0 24px rgba(0,0,0,.12)}
+.rail:hover{transition-delay:.3s}
+.rail:hover .lbl{transition-delay:.3s}
+.rail-top,.rail a{display:flex;align-items:center;gap:12px;padding:7px 12px;white-space:nowrap;color:var(--muted);text-decoration:none;font-size:.93rem}
+.rail-top{margin-bottom:8px;color:var(--ink);cursor:pointer}
+.rail .num{flex:none;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--rule);font-size:.78rem;font-weight:600;color:var(--muted)}
+.rail-top .num{border:0;font-size:1.1rem;color:var(--ink)}
+.rail a.sub .num{border:0}
+.rail a.sub .num i{display:block;width:7px;height:7px;border-radius:50%;background:var(--rule)}
+.rail .lbl{opacity:0;transition:opacity .15s}
+.rail:hover .lbl,.rail.open .lbl{opacity:1}
+.rail a:hover{color:var(--ink)}
+.rail a.active{color:var(--ink);font-weight:600}
+.rail a.active .num{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.rail a.sub.active .num{background:none}
+.rail a.sub.active .num i{background:var(--accent);width:9px;height:9px}
+.rail a:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+@media (max-width:600px){body{padding-left:40px}.rail{width:40px}.rail-top,.rail a{padding:7px 8px}}
+.embrow{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+.embrow input{flex:1 1 280px}
+.emb-stage{position:relative;overflow:hidden}
+#emb-inner{position:absolute;top:0;left:0;width:900px;transform-origin:0 0}
+.e-abs{position:absolute;top:0;left:0}
+.ech{height:40px;justify-content:center;font-size:13px}
+.ech sub{display:block}
+.etab{border:1px solid var(--rule);border-radius:12px;background:var(--bg)}
+.etab-t{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.ecell{height:22px;display:flex;align-items:center;justify-content:center;border-radius:4px;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;font-variant-numeric:tabular-nums;background:var(--surface);border:1px solid var(--rule);color:var(--ink);transition:background .25s,border-color .25s}
+.ecell.small{font-size:10px}
+.ecell.hit{background:var(--hl-soft);border-color:var(--hl)}
+.ecell.vec{background:hsl(var(--h) var(--ts) var(--tl));border-color:hsl(var(--h) var(--bs) var(--bl))}
+.ecell.vec.base{background:var(--chip);border-color:var(--chip-b)}
+.edots{color:var(--muted);font-size:15px;text-align:center;line-height:22px}
+.ntlast{box-shadow:0 0 0 3px var(--hl)}
+.ntrib{height:16px;border-radius:3px;border:1px solid var(--rule)}
+.ntbar{width:60px;height:230px}
+.ntb{position:absolute;bottom:0;left:6px;width:48px;height:20px;border-radius:5px 5px 0 0;background:hsl(345 55% 60%);transition:height .6s cubic-bezier(.4,0,.2,1),opacity .4s}
+.ntb.trim{opacity:.35;background-image:repeating-linear-gradient(45deg,var(--surface) 0 3px,transparent 3px 7px)}
+.ntb.chosen{box-shadow:0 0 0 3px var(--ink)}
+.ntv{position:absolute;left:0;width:60px;text-align:center;font-size:12px;font-variant-numeric:tabular-nums;color:var(--ink);transition:bottom .6s cubic-bezier(.4,0,.2,1)}
+.ntl{position:absolute;top:236px;left:0;width:60px;text-align:center;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;white-space:pre;color:var(--ink)}
+.ntstrip{width:860px;height:30px;border-radius:6px;overflow:hidden;background:var(--chip)}
+.ntstrip i{position:absolute;top:0;height:30px;font-style:normal;font-size:11px;line-height:30px;text-align:center;overflow:hidden;white-space:pre;font-family:"JetBrains Mono",ui-monospace,monospace;color:#172033}
+.ntptr{font-size:20px;line-height:20px;color:var(--ink);margin-left:-7px}
+.ntlift{width:10px;height:10px;border-radius:2px}
+.ntnext{box-shadow:0 0 0 2px var(--hl);border-radius:3px;background:var(--hl-soft);width:auto;padding:0 2px;color:var(--ink)}
+.ntc{display:inline-flex;align-items:center;gap:6px;font-size:.88rem;color:var(--muted)}
+.ntc b{min-width:2.4em;color:var(--ink);font-variant-numeric:tabular-nums}
+.ntc input{width:110px;accent-color:var(--accent)}
+.flow-inner{position:absolute;top:0;left:0;width:1000px;transform-origin:0 0}
+.flow-inner.live .av{transition:none!important}
+.fmat{background-size:8px 8px}
+.bg{--kc:#0E9AA7}.bu{--kc:#3B5BDB}.bhid{--kc:var(--muted)}
+.mex{border:2px solid var(--ec);border-radius:12px;background:var(--surface);padding:10px 12px;font-size:13px}
+.mex b{font-size:14px}
+.mex-m{display:flex;gap:6px;margin:8px 0 4px}.mex-m i{display:block;width:38px;height:22px;border-radius:3px}
+.mex span{color:var(--muted);font-size:11.5px}
+.mpick{width:18px;height:18px;border:2.5px solid var(--ink);border-radius:3px;z-index:3}
+.mtag{width:40px;overflow:hidden;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10px;padding:1px 3px;border-radius:3px;background:var(--chip);color:var(--ink);white-space:pre}
+.albl.msum{width:900px;white-space:normal;font-size:14px;color:var(--ink);line-height:1.45}
+.mexpr-t{font-family:"JetBrains Mono",ui-monospace,monospace;color:var(--ink)}
+.av-stage{position:relative;overflow:hidden;margin-top:6px}
+#av-inner{position:absolute;top:0;left:0;width:1000px;transform-origin:0 0}
+.av{position:absolute;top:0;left:0;transform-origin:0 0;transition:transform .8s cubic-bezier(.4,0,.2,1),opacity .5s}
+#av-inner.live .av{transition:none!important}
+#av-inner.quick .av{transition-duration:.25s!important}
+.ach,.avec{width:16px;border:1.5px solid var(--kc);border-radius:3px;background-color:var(--surface);transform-origin:50% 50%}
+.ach{background:none}
+.ach{height:40px;display:flex;flex-direction:column;overflow:visible}
+.ach i{display:block;flex:1;transition:transform .35s ease-out}
+#av-inner.live .ach i{transition:none}
+.aarrow{pointer-events:none}
+.ach.fused{border-top-width:0;border-bottom-width:0;border-radius:0}
+.ach.fused.hf{border-top-width:1.5px;border-radius:3px 3px 0 0}
+.ach.fused.hl{border-bottom-width:1.5px;border-radius:0 0 3px 3px}
+.anorm{font-size:13px;font-weight:600;color:var(--ink)}
+.mx-glyph.aexpr{z-index:4;color:var(--ink);font-weight:600;font-size:13px}
+.avec{height:160px}
+.bx,.bh{--kc:var(--ink)}.bq{--kc:#3B5BDB}.bk{--kc:#E8890C}.bv{--kc:#2F9E62}.bo{--kc:#8A4FD1}
+.amat{border-radius:4px;background-image:linear-gradient(90deg,rgba(255,255,255,.35) 1px,transparent 1px),linear-gradient(rgba(255,255,255,.35) 1px,transparent 1px);background-size:10px 10px}
+.amat.mq{background-color:#3B5BDB}.amat.mk{background-color:#E8890C}.amat.mv{background-color:#2F9E62}.amat.mo{background-color:#8A4FD1}
+.amat b{position:absolute;top:-22px;left:0;font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap}
+.amat i{position:absolute;top:-21px;left:34px;font-size:11px;font-style:normal;color:var(--muted);white-space:nowrap}
+.agc{width:26px;height:26px;border-radius:4px;border:1px solid var(--rule)}
+.agc.rowhl{box-shadow:0 0 0 2px var(--ink)}
+.av-sticky{position:sticky;top:0;z-index:6;background:var(--surface);padding:6px 0 10px;margin-bottom:8px;border-bottom:1px solid var(--rule)}
+.agc.masked{background-image:repeating-linear-gradient(45deg,var(--rule) 0 3px,transparent 3px 7px)}
+.albl{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.atl{width:28px;font-size:10px;text-align:center;overflow:hidden;white-space:pre;font-family:"JetBrains Mono",ui-monospace,monospace}
+.mx-stage{position:relative;overflow:hidden;margin-top:6px}
+#mx-inner{position:absolute;top:0;left:0;width:880px;height:690px;transform-origin:0 0}
+#mx-axes,#mx-vec{position:absolute;top:0;left:0;transition:opacity .6s}
+.mx{position:absolute;top:0;left:0;transform-origin:0 0;transition:transform .9s cubic-bezier(.4,0,.2,1),opacity .6s}
+#mx-inner.live .mx{transition:none}
+.nc{width:62px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:6px;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:13px;font-variant-numeric:tabular-nums;color:var(--ink)}
+.nq{background:color-mix(in srgb,var(--accent) 16%,var(--surface));border:1.5px solid var(--accent)}
+.nk{background:color-mix(in srgb,var(--hl) 22%,var(--surface));border:1.5px solid var(--hl)}
+.np{background:var(--chip);border:1.5px solid var(--chip-b)}
+.ns{background:var(--ink);color:var(--bg);font-weight:600}
+.mx-box{width:146px;height:92px;border:2px solid hsl(var(--pc) 60% 55%);border-radius:10px}
+.mx-box span{position:absolute;top:-19px;left:2px;font-size:12px;font-weight:600;color:hsl(var(--pc) 55% 52%)}
+.mx-lbl{width:122px;height:30px;display:flex;align-items:center;font-size:13px;color:var(--muted)}
+.mx-glyph{width:20px;height:24px;text-align:center;font-size:17px;line-height:24px;color:var(--muted)}
+.mx-text{height:24px;line-height:24px;font-size:13px;color:var(--muted);white-space:nowrap}
+@media (prefers-reduced-motion:reduce){.mx{transition:none}}
+.rope{margin-top:30px}
+.rope-h{font-size:clamp(1.5rem,3vw,2rem);line-height:1.15;font-weight:600;letter-spacing:-.015em;margin:0 0 .35em}
+.rope-intro{max-width:70ch;margin:0 0 14px}
+.qk{font-weight:600}
+.qk.q{color:var(--accent)}
+.qk.k{color:var(--hl)}
+.rope-controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px 26px;margin:16px 0 4px}
+.rope-controls label{display:flex;flex-direction:column;gap:4px;font-size:.92rem;color:var(--muted)}
+.rope-controls b{color:var(--ink);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.dials{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-top:14px}
+.dial{background:var(--surface);border:1px solid var(--rule);border-radius:12px;padding:10px 14px 12px}
+.dial svg{width:100%;max-width:170px;display:block;margin:0 auto}
+.dial .nm{font-weight:600;font-size:.95rem}
+.dial .sp,.dial .ct{font-size:.86rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.cbar{height:8px;background:var(--bg);border-radius:4px;position:relative;margin:6px 0 3px}
+.cbar::after{content:"";position:absolute;left:50%;top:-2px;bottom:-2px;border-left:1px solid var(--muted)}
+.cbar i{position:absolute;top:0;bottom:0;border-radius:4px}
+.rope-total{margin:16px 0;padding:14px 16px;background:var(--surface);border:1px solid var(--rule);border-radius:12px}
+.rope-total .score{font-size:1.6rem;font-weight:600;font-variant-numeric:tabular-nums}
+.rope-curve{background:var(--surface);border:1px solid var(--rule);border-radius:12px;padding:14px 16px;margin-bottom:8px}
+.rope-curve h3{font-size:1rem;margin:0 0 6px;font-weight:600}
+.rope-curve svg{width:100%;height:auto;display:block}
+.chapters{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-top:18px}
+.chapters .site{font-weight:600;margin-right:12px}
+.chapters button{font:inherit;font-size:.95rem;padding:.35em .9em;border-radius:20px;border:1px solid var(--rule);background:transparent;color:var(--muted);cursor:pointer}
+.chapters button[aria-current="page"]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.vocab0{margin-top:18px}
+.vocab0 h2{font-size:1rem;font-weight:600;margin:0 0 8px}
+.vocab0 .tok sub{display:block}
+.ids-out{font-size:.84rem;background:var(--bg);padding:10px 12px;border-radius:8px;margin-top:10px;word-break:break-word}
+@media (prefers-reduced-motion:reduce){.tok.fresh,.enter .tok{animation:none}.tok.fresh{box-shadow:0 0 0 2px var(--accent)}}
+</style>
+</head>
+<body>
+<nav class="rail" id="rail" aria-label="Sections">
+  <div class="rail-top"><span class="num">≡</span><span class="lbl"><b>Inside a transformer</b></span></div>
+  <a href="#sec-tok"><span class="num">1</span><span class="lbl">Tokenizer</span></a>
+  <a href="#sec-emb"><span class="num">2</span><span class="lbl">Embeddings</span></a>
+  <a href="#sec-norm"><span class="num">3</span><span class="lbl">Normalisation</span></a>
+  <a href="#sec-rope"><span class="num">4</span><span class="lbl">Rotary positions</span></a>
+  <a href="#sec-rope-play" class="sub"><span class="num"><i></i></span><span class="lbl">Playing with rotary</span></a>
+  <a href="#sec-att"><span class="num">5</span><span class="lbl">Attention</span></a>
+  <a href="#sec-ffn"><span class="num">6</span><span class="lbl">Feed-forward</span></a>
+  <a href="#sec-moe" class="sub"><span class="num"><i></i></span><span class="lbl">Mixture of experts</span></a>
+  <a href="#sec-next"><span class="num">7</span><span class="lbl">Next token</span></a>
+</nav>
+<main id="page">
+<section class="wrap stop" id="sec-tok">
+  <header>
+    <h1>Building a tokenizer</h1>
+    <p class="sub">Inside a transformer, chapter 1</p>
+    <section class="vocab0">
+      <h2>Initial tokens (ASCII or otherwise)</h2>
+      <div class="chips" id="vocab0"></div>
+      <p class="note">Every possible byte gets an id from 0 to 255. Shown here are just the ones your training text uses, in id order; the dots stand for the rest. Bytes 32–126 are ordinary ASCII letters, digits and punctuation, and 128–255 are pieces of multi-byte characters like é or 🙂.</p>
+    </section>
+  </header>
+
+  <section class="caption" id="caption" aria-live="polite"></section>
+
+  <section class="canvas">
+    <div id="sentence"></div>
+    <div class="histwrap"><h3>Pair counts</h3><div id="hist"></div></div>
+  </section>
+
+  <div class="controls">
+    <button class="btn" id="back">Back</button>
+    <button class="btn primary" id="next"></button>
+    <button class="btn" id="play">Play</button>
+    <button class="btn" id="skip">Skip 5 merges</button>
+    <button class="btn" id="finish">Finish the rest</button>
+    <button class="btn" id="reset">Start over</button>
+    <span class="spacer"></span>
+    <label class="toggle"><input type="checkbox" id="showids"> Show token ids</label>
+  </div>
+
+  <div class="panels">
+    <section class="panel"><h3>Try the tokenizer on other text</h3>
+      <input type="text" id="try" aria-label="Text to tokenize" spellcheck="false">
+      <div id="try-out"></div>
+    </section>
+  </div>
+</section>
+<section class="wrap stop" id="sec-emb">
+  <header>
+    <h1>Embeddings</h1>
+    <p class="sub">Inside a transformer, chapter 2</p>
+  </header>
+  <section class="caption">
+    <h2>Look up each token’s vector</h2>
+    <p>Each token id picks one column from a big learned table, the embedding table, and gets a copy of that column’s numbers. That copy is the token’s embedding. Nothing is computed: it’s a lookup. The table starts out as random numbers and is adjusted during training, like every other weight in the model.</p>
+    <p class="aside">Our model gets its position information later, inside attention (chapter 5). Older models like GPT-2 instead look up a second vector for each position here and add it on.</p>
+  </section>
+  <div class="embrow">
+    <input type="text" id="emb-text" aria-label="Sentence to embed" spellcheck="false">
+    <button class="btn" id="emb-use">Use this sentence</button>
+  </div>
+  <section class="canvas">
+    <div class="emb-stage" id="emb-stage"><div id="emb-inner"></div></div>
+    <p class="note" id="emb-status"></p>
+  </section>
+  <div class="controls" style="margin-bottom:56px">
+    <button class="btn primary" id="emb-play">Look up the embeddings</button>
+    <button class="btn" id="emb-reset">Reset</button>
+  </div>
+</section>
+<section class="wrap stop" id="sec-norm">
+  <header>
+    <h1>Normalisation</h1>
+    <p class="sub">Inside a transformer, chapter 3</p>
+  </header>
+  <section class="caption">
+    <h2>Bring every vector to the same size</h2>
+    <p>Before attention, each token’s vector is rescaled to a standard length. This step is called RMSNorm, and it happens again before every attention and feed-forward block. Every layer adds onto the running vectors, so without it their sizes would keep drifting and attention scores would swing to extremes. Geometrically it’s two moves: slide every vector onto a sphere, then stretch the sphere.</p>
+  </section>
+  <section class="canvas">
+    <p class="stepno" id="n3-stepno"></p>
+    <h3 class="ms-h" id="n3-h"></h3>
+    <p class="ms-text" id="n3-text"></p>
+    <svg id="n3" viewBox="0 0 640 480" role="img" aria-label="Token vectors as arrows in 3D, normalised onto a sphere and then stretched into an ellipsoid"></svg>
+    <p class="note n3-note">This is a visualisation with d = 3 numbers per vector, so it can be drawn. In a real model each vector has d numbers (4,096 in Llama 3 8B) and lands on a sphere of radius √d in d-dimensional space: radius 64 for d = 4,096.</p>
+  </section>
+  <div class="controls" style="margin-bottom:56px">
+    <button class="btn" id="n3-back">Back</button>
+    <button class="btn primary" id="n3-next"></button>
+  </div>
+</section>
+<section class="wrap stop" id="sec-rope">
+  <header>
+    <h1>Rotary positions</h1>
+    <p class="sub">Inside a transformer, chapter 4</p>
+  </header>
+  <section class="caption">
+    <h2>Where position comes in</h2>
+    <p>The embeddings carry no position information. Instead, inside every attention layer (step 4 of chapter 5), each token’s query and key are rotated by its position just before they’re compared. This is rotary position embedding (RoPE), used by Llama and most current models.</p>
+  </section>
+  <section class="mathsec">
+    <h2 class="rope-h">The rotary math, step by step</h2>
+    <div class="rope-controls">
+      <label>Query position m <b id="mx-m-v"></b><input type="range" id="mx-m" min="0" max="40" value="5"></label>
+      <label>Key position n <b id="mx-n-v"></b><input type="range" id="mx-n" min="0" max="40" value="2"></label>
+    </div>
+    <p class="note" id="mx-lock" style="min-height:1.4em;margin-top:0"></p>
+    <div class="canvas">
+      <p class="stepno" id="mx-stepno"></p>
+      <h3 class="ms-h" id="mx-h"></h3>
+      <p class="ms-text" id="mx-text"></p>
+      <div class="mx-stage" id="mx-stage"><div id="mx-inner"><svg id="mx-axes" width="880" height="690" aria-hidden="true"></svg><svg id="mx-vec" width="880" height="690" aria-hidden="true"></svg></div></div>
+    </div>
+    <div class="controls">
+      <button class="btn" id="mx-back">Back</button>
+      <button class="btn primary" id="mx-next"></button>
+    </div>
+  </section>
+
+</section>
+<section class="wrap stop" id="sec-rope-play">
+  <section class="rope">
+    <h2 class="rope-h">Playing with rotary</h2>
+    <p class="rope-intro">Inside attention, a query and a key are each cut into pairs of numbers, drawn here as arrows. Four of the 32 pairs are shown, from fastest to slowest. Each arrow is turned by its position times its pair’s speed. <span class="qk q">Blue</span> is the query, <span class="qk k">orange</span> the key, and the faint dashed arrows are where they pointed before turning. Watch the angle between them: it depends only on how far apart the two positions are.</p>
+    <div class="row">
+      <button class="btn" data-rope="random">New random query and key</button>
+    </div>
+    <div class="rope-controls">
+      <label>Query position <b id="rope-m-v"></b><input type="range" id="rope-m" min="0" max="63" value="10"></label>
+      <label>Key position <b id="rope-n-v"></b><input type="range" id="rope-n" min="0" max="63" value="7"></label>
+      <label>Shift both by <b id="rope-s-v"></b><input type="range" id="rope-s" min="0" max="500" value="0"></label>
+    </div>
+    <div class="dials" id="rope-dials"></div>
+    <div class="rope-total" id="rope-total"></div>
+  </section>
+  <div style="height:56px"></div>
+</section>
+<section class="wrap stop" id="sec-att">
+  <header>
+    <h1>Attention</h1>
+    <p class="sub">Inside a transformer, chapter 5</p>
+  </header>
+  <section class="caption">
+    <h2>Tokens share information</h2>
+    <p>Attention is the only place where tokens look at each other. Each token works out what it’s looking for, compares that with what every earlier token offers, and gathers information from the best matches. Each vector here is drawn as a column of shaded cells; the numbers themselves don’t matter, only how they flow.</p>
+  </section>
+  <section class="canvas" style="margin-bottom:56px">
+    <div class="av-sticky">
+      <p class="stepno" id="av-stepno"></p>
+      <h3 class="ms-h" id="av-h"></h3>
+      <p class="ms-text" id="av-text"></p>
+      <div class="controls" style="margin-top:0">
+        <button class="btn" id="av-back">Back</button>
+        <button class="btn primary" id="av-next"></button>
+      </div>
+    </div>
+    <div class="av-stage" id="av-stage"><div id="av-inner"></div></div>
+  </section>
+</section>
+<section class="wrap stop" id="sec-ffn">
+  <header>
+    <h1>Feed-forward</h1>
+    <p class="sub">Inside a transformer, chapter 6</p>
+  </header>
+  <section class="caption">
+    <h2>Each token thinks on its own</h2>
+    <p>After attention has mixed information between tokens, the feed-forward block processes each token by itself: widen the vector, bend it with a simple curve, and shrink it back. It holds most of a dense model’s parameters (about 80% of each layer in Llama 3 8B). Below the dense version is the mixture-of-experts version, which swaps this one block for several.</p>
+  </section>
+  <section class="canvas" style="margin-bottom:56px">
+    <div class="av-sticky">
+      <p class="stepno" id="ff-stepno"></p>
+      <h3 class="ms-h" id="ff-h"></h3>
+      <p class="ms-text" id="ff-text"></p>
+      <div class="controls" style="margin-top:0">
+        <button class="btn" id="ff-back">Back</button>
+        <button class="btn primary" id="ff-next"></button>
+      </div>
+    </div>
+    <div class="av-stage" id="ff-stage"><div id="ff-inner" class="flow-inner"></div></div>
+  </section>
+
+</section>
+<section class="wrap stop" id="sec-moe">
+  <h2 class="rope-h" style="margin-top:28px">Mixture of experts</h2>
+  <section class="canvas" style="margin-bottom:56px">
+    <div class="av-sticky">
+      <p class="stepno" id="moe-stepno"></p>
+      <h3 class="ms-h" id="moe-h"></h3>
+      <p class="ms-text" id="moe-text"></p>
+      <div class="controls" style="margin-top:0">
+        <button class="btn" id="moe-back">Back</button>
+        <button class="btn primary" id="moe-next"></button>
+      </div>
+    </div>
+    <div class="av-stage" id="moe-stage"><div id="moe-inner" class="flow-inner"></div></div>
+  </section>
+</section>
+<section class="wrap stop" id="sec-next">
+  <header>
+    <h1>The next token</h1>
+    <p class="sub">Inside a transformer, chapter 7</p>
+  </header>
+  <section class="caption">
+    <h2>From a vector to a word</h2>
+    <p>After the last layer, one final step turns the model’s running vectors into a choice: normalise, take the last position, score every token in the vocabulary, shape those scores into probabilities, and draw one.</p>
+  </section>
+  <section class="canvas" style="margin-bottom:56px">
+    <div class="av-sticky">
+      <p class="stepno" id="nt-stepno"></p>
+      <h3 class="ms-h" id="nt-h"></h3>
+      <p class="ms-text" id="nt-text"></p>
+      <div class="controls" style="margin-top:0">
+        <button class="btn" id="nt-back">Back</button>
+        <button class="btn primary" id="nt-next"></button>
+        <button class="btn" id="nt-draw" hidden>Draw again</button>
+        <span class="spacer"></span>
+        <label class="ntc">Temperature <b id="nt-temp-v"></b><input type="range" id="nt-temp" min="0.05" max="2" step="0.05" value="1"></label>
+        <label class="ntc">Top-k <b id="nt-k-v"></b><input type="range" id="nt-k" min="1" max="50" step="1" value="50"></label>
+        <label class="ntc">Top-p <b id="nt-p-v"></b><input type="range" id="nt-p" min="0.05" max="1" step="0.05" value="0.9"></label>
+      </div>
+    </div>
+    <div class="av-stage" id="nt-stage"><div id="nt-inner" class="flow-inner"></div></div>
+  </section>
+</section>
+</main>
+
+<script>
+const DEFAULT_TEXT = `The cat sat on the mat, and the rat sat on the hat. "That's the fat cat!" said the rat.`;
+const PAT = /'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+/gu;
+const SLOW_COUNT = 4;
+const SPEEDS = [1, 2, 4, 8];
+const NEXT = {sentence: "split", split: "pairs", pairs: "count", pick: "merge", merge: "pairs"};
+const NEXT_LABEL = {sentence: "Split into characters", split: "Find neighbouring pairs", pairs: "Count the pairs", count: "Pick the most common", pick: "Replace it everywhere", merge: "Find neighbouring pairs", done: "Done"};
+const STEP = {split: 1, pairs: 2, count: 3, pick: 4, merge: 5};
+const DELAY = {sentence: 1200, split: 1600, pairs: 1500, count: 1200, pick: 1900, merge: 1900};
+
+const enc = new TextEncoder();
+const dec = new TextDecoder("utf-8", {fatal: true});
+const $ = s => document.querySelector(s);
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const S = {text: DEFAULT_TEXT, tryText: "The fat rat sat on that hat. Zebras jump quickly! 🦓", flyers: [], playing: false, speed: 1};
+const ms = x => x / S.speed;
+const wait = t => new Promise(r => setTimeout(r, t));
+
+const esc = s => s.replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const hex = n => n.toString(16).padStart(2, "0");
+const vis = s => s.replace(/ /g, "␣").replace(/\n/g, "↵").replace(/\t/g, "⇥")
+  .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, c => "‹" + hex(c.charCodeAt(0)) + "›");
+
+function label(id) {
+  const bytes = S.vocab[id];
+  try { return vis(dec.decode(new Uint8Array(bytes))); }
+  catch { return bytes.map(b => b < 128 ? vis(String.fromCharCode(b)) : "‹" + hex(b) + "›").join(""); }
+}
+
+function chip(id, cls = "", attrs = "") {
+  const base = id < 256;
+  const h = base ? 0 : Math.round(((id - 256) * 137.508) % 360);
+  return `<span class="tok ${base ? "base" : ""} ${cls}" style="--h:${h}" title="token ${id}" ${attrs}>${esc(label(id))}<sub>${id}</sub></span>`;
+}
+const pairChips = (a, b) => `${chip(a)}<span class="plus">+</span>${chip(b)}`;
+const tokenCount = () => S.words.reduce((t, w) => t + w.length, 0);
+const blockH = (max = S.pairs[0]?.count || 1) => Math.max(3, Math.min(16, Math.floor(170 / max) - 2));
+
+function init() {
+  S.words = (S.text.match(PAT) || []).map(p => [...enc.encode(p)]);
+  S.vocab = Array.from({length: 256}, (_, i) => [i]);
+  S.merges = [];
+  S.rank = new Map();
+  S.history = [];
+  S.phase = "sentence";
+  S.fresh = null;
+  S.before = 0;
+  S.ci = 0;
+  S.lastPairs = null;
+  S.countMode = "done";
+  S.pairs = countPairs();
+}
+
+function countPairs() {
+  const m = new Map();
+  let order = 0;
+  for (const w of S.words) {
+    for (let i = 0; i < w.length - 1; i++) {
+      const key = w[i] + "," + w[i + 1];
+      let p = m.get(key);
+      if (!p) { p = {a: w[i], b: w[i + 1], key, count: 0, first: order, h: Math.round((order * 137.508 + 30) % 360)}; order++; m.set(key, p); }
+      p.count++;
+    }
+  }
+  S.pairMap = m;
+  return [...m.values()].sort((x, y) => y.count - x.count || x.first - y.first);
+}
+
+function replacePair(ids, a, b, id) {
+  const out = [];
+  for (let i = 0; i < ids.length; i++) {
+    if (i < ids.length - 1 && ids[i] === a && ids[i + 1] === b) { out.push(id); i++; }
+    else out.push(ids[i]);
+  }
+  return out;
+}
+
+function doMerge() {
+  const top = S.pairs[0];
+  const id = S.vocab.length;
+  S.before = tokenCount();
+  S.vocab.push([...S.vocab[top.a], ...S.vocab[top.b]]);
+  S.merges.push({a: top.a, b: top.b, id, count: top.count});
+  S.rank.set(top.key, S.merges.length - 1);
+  S.words = S.words.map(w => replacePair(w, top.a, top.b, id));
+  S.fresh = id;
+  S.lastPairs = S.pairs;
+  S.pairs = countPairs();
+}
+
+function encode(text) {
+  return (text.match(PAT) || []).flatMap(p => {
+    let ids = [...enc.encode(p)];
+    while (ids.length > 1) {
+      let best = -1;
+      for (let i = 0; i < ids.length - 1; i++) {
+        const r = S.rank.get(ids[i] + "," + ids[i + 1]);
+        if (r !== undefined && (best < 0 || r < best)) best = r;
+      }
+      if (best < 0) break;
+      const m = S.merges[best];
+      ids = replacePair(ids, m.a, m.b, m.id);
+    }
+    return ids;
+  });
+}
+
+function computeOcc() {
+  S.occ = [];
+  S.words.forEach((w, wi) => { for (let i = 0; i < w.length - 1; i++) S.occ.push({key: w[i] + "," + w[i + 1], wi, i}); });
+  if (S.phase === "count" && S.countMode === "done") S.ci = S.occ.length;
+}
+
+function renderCaption() {
+  const top = S.pairs[0], last = S.merges[S.merges.length - 1];
+  const round = S.phase === "merge" ? S.merges.length : S.merges.length + 1;
+  const step = STEP[S.phase] && (round === 1 ? STEP[S.phase] : STEP[S.phase] - 1);
+  const stepno = step ? `Round ${round}, step ${step} of ${round === 1 ? 5 : 4}` : S.phase === "done" ? `Finished after ${S.merges.length} merges` : "Setup";
+  const N = S.occ.length;
+  let h, body;
+  if (S.phase === "sentence") {
+    h = "The training text";
+    body = `<p>This is the text the tokenizer learns from. Real tokenizers read billions of words, but one sentence with some repetition is enough to see how it works. Edit it below if you like.</p>`;
+  } else if (S.phase === "split" && !S.merges.length) {
+    h = "Break it into characters";
+    body = `<p>Every character becomes its own token. Strictly, every byte: plain English letters are one byte each, but characters like é, — or 🙂 take two to four, so they show up as several pieces (in hex). The text is also cut into words, and the dashed lines are walls: tokens are never glued across them.</p>
+      <p class="aside">Notice where the spaces went. Each space sticks to the front of the word after it, shown as ␣. So “␣cat” and “cat” will be different tokens.</p>`;
+  } else if (S.phase === "split") {
+    h = "Start again from the current tokens";
+    body = `<p class="chips">Same starting point as round 1, except the merges so far are applied: ${chip(last.id)} is now a single token everywhere it appears. There are ${tokenCount()} tokens now.</p>
+      <p class="aside">Nothing from the last count is kept. Each round counts from scratch, because merging changed who sits next to whom.</p>`;
+  } else if (S.phase === "pairs") {
+    h = "Find every pair of neighbours";
+    body = `<p>Each bracket joins two tokens sitting side by side. Every token belongs to two pairs, one on each side, so the brackets alternate above and below. Brackets of the same colour are the same pair.</p>
+      <p class="aside">No bracket crosses a wall.</p>`;
+  } else if (S.phase === "count" && S.countMode === "slow") {
+    const o = S.occ[S.ci - 1], p = S.pairMap.get(o.key);
+    const n = S.occ.slice(0, S.ci).filter(x => x.key === o.key).length;
+    h = "Count them";
+    body = `<p class="chips">Pair ${S.ci} of ${N}: ${pairChips(p.a, p.b)}. ${n === 1 ? "First time we’ve seen it, so it gets a new bar." : `Seen ${n} times so far, so its bar grows to ${n}.`}</p>
+      <p class="aside">The first few go one at a time so you can follow them. The rest will go quickly.</p>`;
+  } else if (S.phase === "count" && S.countMode === "fast") {
+    h = "Count the rest, quickly";
+    body = `<p>The remaining ${N - Math.min(SLOW_COUNT, N)} pairs, same rule: each drops into its own bar, and repeats stack up.</p>`;
+  } else if (S.phase === "count") {
+    h = `All ${N} pairs counted`;
+    body = `<p>Each bar’s height is how many times that pair appears in the text. Next, sort the bars and take the tallest.</p>`;
+  } else if (S.phase === "pick") {
+    const ties = S.pairs.filter(p => p.count === top.count).length - 1;
+    h = "Pick the most common pair";
+    body = `<p class="chips">The bars are now sorted, tallest first. The winner is ${pairChips(top.a, top.b)}, seen ${top.count} times. It’s highlighted in the sentence.</p>
+      ${ties ? `<p class="aside">${ties === 1 ? "One other pair is" : `${ties} other pairs are`} tied at the same height (dashed outline). This demo picks the one that appears first in the text. Real tokenizers each have their own tie-break rule.</p>` : ""}`;
+  } else if (S.phase === "merge") {
+    h = "Replace it everywhere";
+    body = `<p class="chips">Every ${pairChips(last.a, last.b)} is now one token, ${chip(last.id)}, with id ${last.id}. That’s merge rule ${S.merges.length}.</p>
+      <p>The sentence went from ${S.before} tokens to ${tokenCount()}. Next round finds the neighbouring pairs again, this time between these tokens instead of single characters. Nothing from the last count is kept.</p>`;
+  } else {
+    h = "Nothing left to merge";
+    body = `<p>Every word is now a single token, so there are no pairs left. With real training text this never happens. Instead you stop when the vocabulary reaches a size chosen in advance, such as 50,000.</p>`;
+  }
+  $("#caption").innerHTML = `<p class="stepno">${stepno}</p><h2>${h}</h2>${body}`;
+}
+
+function renderSentence(enter) {
+  if (S.phase === "sentence") {
+    $("#sentence").innerHTML = `<textarea id="text" class="plain" rows="3" maxlength="3000" aria-label="Training text" spellcheck="false">${esc(S.text)}</textarea>`;
+    return;
+  }
+  const win = S.phase === "pick" ? S.pairs[0] : null;
+  const cur = S.phase === "count" && S.countMode === "slow" ? S.occ[S.ci - 1] : null;
+  const fresh = ["merge", "split"].includes(S.phase) ? S.fresh : null;
+  const groups = S.words.map((w, wi) => {
+    let html = "";
+    const at = j => `data-w="${wi}" data-i="${j}"`;
+    for (let i = 0; i < w.length; i++) {
+      if ((win && i < w.length - 1 && w[i] === win.a && w[i + 1] === win.b) || (cur && cur.wi === wi && cur.i === i)) {
+        html += `<span class="pair">${chip(w[i], "", at(i))}${chip(w[i + 1], "", at(i + 1))}</span>`;
+        i++;
+      } else html += chip(w[i], w[i] === fresh && S.phase === "merge" ? "fresh" : "", at(i));
+    }
+    return `<span class="word">${html}</span>`;
+  });
+  $("#sentence").innerHTML = `<div class="sent ${enter ? "enter" : ""} ${tokenCount() > 150 ? "dense" : ""}" id="sent">${groups.join('<span class="wall" aria-hidden="true"></span>')}</div>`;
+  if (enter) {
+    const toks = document.querySelectorAll(".enter .tok");
+    toks.forEach((el, n) => el.style.setProperty("--d", ms(n * 200 / toks.length) + "ms"));
+  }
+}
+
+function drawBrackets() {
+  const sent = $("#sent");
+  if (!sent || !["pairs", "count", "pick"].includes(S.phase)) return;
+  sent.querySelectorAll(".br").forEach(b => b.remove());
+  const cr = sent.getBoundingClientRect();
+  const win = S.phase === "pick" ? S.pairs[0].key : null;
+  const shownUpTo = countedUpTo();
+  S.occ.forEach((o, k) => {
+    const ra = sent.querySelector(`[data-w="${o.wi}"][data-i="${o.i}"]`).getBoundingClientRect();
+    const rb = sent.querySelector(`[data-w="${o.wi}"][data-i="${o.i + 1}"]`).getBoundingClientRect();
+    const above = o.i % 2 === 0;
+    let state = "";
+    if (win) state = o.key === win ? "" : "dim";
+    else if (S.phase === "count") state = k < shownUpTo ? "dim" : S.countMode === "slow" && k === S.ci - 1 ? "cur" : "";
+    const el = document.createElement("div");
+    el.className = `br ${above ? "above" : "below"} ${state}`;
+    const left = (ra.left + ra.right) / 2 - cr.left;
+    el.style.cssText = `--h:${S.pairMap.get(o.key).h};left:${left}px;width:${(rb.left + rb.right) / 2 - cr.left - left}px;top:${above ? ra.top - cr.top - 13 : ra.bottom - cr.top + 4}px`;
+    sent.appendChild(el);
+    o.el = el;
+  });
+}
+
+function countedUpTo() {
+  if (S.countMode === "slow") return S.ci - 1;
+  if (S.countMode === "fast") return Math.min(SLOW_COUNT, S.occ.length);
+  return S.occ.length;
+}
+
+function renderHist() {
+  if (S.phase === "count") return renderCountHist();
+  const stale = S.phase === "merge" && S.lastPairs;
+  if (S.phase !== "pick" && !stale) {
+    const msg = S.phase === "merge" ? "Counts cleared: the neighbours just changed." : S.phase === "pairs" ? "Next, each pair drops into a bar here." : S.phase === "split" && S.merges.length ? "Counts start fresh every round." : "Nothing counted yet.";
+    $("#hist").innerHTML = `<p class="empty">${msg}</p>`;
+    return;
+  }
+  const pairs = stale ? S.lastPairs : S.pairs, top = pairs[0];
+  $("#hist").innerHTML = `${stale ? '<p class="empty">Counts from the round just finished. They’re cleared when you find the next pairs.</p>' : ""}<div class="hist small" style="--bh:${blockH(top.count)}px">${pairs.map((p, n) => {
+    const cls = n === 0 ? "win" : p.count === top.count ? "tie" : "lose";
+    const blocks = Array.from({length: p.count}, () => `<i class="blk on" style="--h:${p.h}"></i>`).join("");
+    return `<div class="bar ${cls}" data-key="${p.key}"><div class="bn">${p.count}</div><div class="stack">${blocks}</div><div class="bl">${chip(p.a)}${chip(p.b)}</div></div>`;
+  }).join("")}</div>`;
+}
+
+function renderCountHist() {
+  const shownUpTo = countedUpTo();
+  const order = [], byKey = new Map();
+  S.occ.slice(0, S.ci).forEach((o, k) => {
+    if (!byKey.has(o.key)) { byKey.set(o.key, []); order.push(o.key); }
+    byKey.get(o.key).push(k);
+  });
+  $("#hist").innerHTML = `<div class="hist small" style="--bh:${blockH()}px">${order.map(key => {
+    const p = S.pairMap.get(key), ks = byKey.get(key);
+    const shown = ks.filter(k => k < shownUpTo).length;
+    const blocks = ks.map(k => `<i class="blk ${k < shownUpTo ? "on" : ""}" data-o="${k}" style="--h:${p.h}"></i>`).join("");
+    return `<div class="bar" data-key="${key}"><div class="bn" data-c="${key}">${shown || ""}</div><div class="stack">${blocks}</div><div class="bl">${chip(p.a)}${chip(p.b)}</div></div>`;
+  }).join("")}</div>`;
+}
+
+function fly(from, to, slow) {
+  const n = to - from;
+  if (!n) return Promise.resolve();
+  const stagger = slow ? 0 : Math.min(70, 1400 / n);
+  if (slow) {
+    const bar = document.querySelector(`.blk[data-o="${from}"]`).closest(".bar"), h = bar.parentElement;
+    h.scrollLeft = bar.offsetLeft - h.clientWidth / 2;
+  }
+  return new Promise(resolve => {
+    let done = 0;
+    for (let k = from; k < to; k++) {
+      const o = S.occ[k];
+      const blk = document.querySelector(`.blk[data-o="${k}"]`);
+      const land = () => {
+        blk.classList.add("on");
+        o.el.classList.remove("cur");
+        o.el.classList.add("dim");
+        const c = document.querySelector(`.bn[data-c="${o.key}"]`);
+        c.textContent = (+c.textContent || 0) + 1;
+        if (++done === n) resolve();
+      };
+      if (reduceMotion) { land(); continue; }
+      const s = o.el.getBoundingClientRect(), t = blk.getBoundingClientRect();
+      const f = document.createElement("div");
+      f.className = "flyer";
+      f.style.cssText = `left:${t.left}px;top:${t.top}px;width:${t.width}px;height:${t.height}px;--h:${S.pairMap.get(o.key).h}`;
+      document.body.appendChild(f);
+      const dx = s.left + s.width / 2 - (t.left + t.width / 2), dy = s.top + s.height / 2 - (t.top + t.height / 2);
+      const anim = f.animate(
+        [{transform: `translate(${dx}px,${dy}px) scale(.55)`}, {transform: "translate(0,0) scale(1)"}],
+        {duration: ms(slow ? 700 : 420), delay: ms((k - from) * stagger), easing: "cubic-bezier(.3,.7,.25,1)", fill: "backwards"});
+      anim.onfinish = () => { f.remove(); land(); };
+      S.flyers.push({anim, f});
+    }
+  });
+}
+
+async function runCount() {
+  const run = S.run = {};
+  S.animating = true;
+  const N = S.occ.length, slow = Math.min(SLOW_COUNT, N);
+  for (let k = 1; k <= slow; k++) {
+    S.countMode = "slow";
+    S.ci = k;
+    renderView();
+    await fly(k - 1, k, true);
+    if (S.run !== run) return;
+    await wait(ms(450));
+    if (S.run !== run) return;
+  }
+  if (N > slow) {
+    S.countMode = "fast";
+    S.ci = N;
+    renderView();
+    await fly(slow, N, false);
+    if (S.run !== run) return;
+  }
+  finishCount();
+}
+
+function stopAnimation() {
+  S.run = null;
+  S.flyers.forEach(({anim, f}) => { anim.cancel(); f.remove(); });
+  S.flyers = [];
+  S.animating = false;
+}
+
+function finishCount() {
+  stopAnimation();
+  S.countMode = "done";
+  renderView();
+  schedule();
+}
+
+function renderControls() {
+  $("#next").textContent = S.animating ? "Finish counting" : NEXT_LABEL[S.phase];
+  $("#next").disabled = S.phase === "done";
+  $("#back").disabled = !S.history.length;
+  $("#skip").disabled = !S.pairs.length || S.phase === "sentence";
+  $("#finish").disabled = $("#skip").disabled;
+  $("#play").textContent = S.playing ? "Pause" : "Play";
+  $("#play").disabled = S.phase === "done";
+}
+
+function renderTry() {
+  const ids = encode(S.tryText);
+  $("#try-out").innerHTML = `<div class="chips" style="margin-top:12px">${ids.map(id => chip(id)).join("")}</div>
+    <p class="note">${enc.encode(S.tryText).length} bytes became ${ids.length} tokens, by replaying the ${S.merges.length} merges learned so far, in the order they were learned.</p>
+    <div class="ids-out">[${ids.join(", ")}]</div>`;
+}
+
+function renderVocab0() {
+  const used = [...new Set(enc.encode(S.text))].sort((a, b) => a - b);
+  const dots = '<span class="more">…</span>';
+  let html = used[0] > 0 ? dots : "";
+  used.forEach((b, i) => { html += (i && b > used[i - 1] + 1 ? dots : "") + chip(b); });
+  $("#vocab0").innerHTML = html + (used[used.length - 1] < 255 ? dots : "");
+}
+
+function renderView(enter = false) {
+  renderVocab0();
+  computeOcc();
+  renderCaption();
+  renderSentence(enter);
+  drawBrackets();
+  renderHist();
+  renderControls();
+  renderTry();
+}
+
+let timer;
+function schedule() {
+  clearTimeout(timer);
+  if (S.phase === "done" && S.playing) { S.playing = false; renderControls(); }
+  if (S.playing) timer = setTimeout(next, ms(DELAY[S.phase]));
+}
+
+function snapshot() { return {phase: S.phase, words: S.words, n: S.merges.length, fresh: S.fresh, before: S.before, lastPairs: S.lastPairs}; }
+
+function next() {
+  if (S.animating) return finishCount();
+  if (S.phase === "done") return;
+  if (S.phase === "sentence") {
+    const v = $("#text").value.trim() || DEFAULT_TEXT;
+    if (v !== S.text) { S.text = v; init(); }
+  }
+  S.history.push(snapshot());
+  if (S.phase === "count") return sortToPick();
+  let p = NEXT[S.phase];
+  if (p === "merge") doMerge();
+  if (p === "pairs" && !S.pairs.length) p = "done";
+  S.phase = p;
+  if (p === "count") return runCount();
+  renderView(p === "split");
+  schedule();
+}
+
+function sortToPick() {
+  const old = new Map([...document.querySelectorAll(".bar[data-key]")].map(b => [b.dataset.key, b.getBoundingClientRect()]));
+  S.phase = "pick";
+  renderView();
+  if (!reduceMotion) document.querySelectorAll(".bar[data-key]").forEach(b => {
+    const o = old.get(b.dataset.key);
+    if (!o) return;
+    const n = b.getBoundingClientRect();
+    b.animate([{transform: `translateX(${o.left - n.left}px)`}, {transform: "none"}], {duration: ms(700), easing: "cubic-bezier(.4,0,.2,1)"});
+  });
+  schedule();
+}
+
+function back() {
+  stopAnimation();
+  const h = S.history.pop();
+  if (!h) return;
+  Object.assign(S, {phase: h.phase, words: h.words, fresh: h.fresh, before: h.before, lastPairs: h.lastPairs, countMode: "done"});
+  S.merges.length = h.n;
+  S.vocab.length = 256 + h.n;
+  S.rank = new Map(S.merges.map((m, i) => [m.a + "," + m.b, i]));
+  S.pairs = countPairs();
+  renderView();
+}
+
+function skip(n) {
+  stopAnimation();
+  S.history.push(snapshot());
+  for (let i = 0; i < n && S.pairs.length; i++) doMerge();
+  S.phase = S.pairs.length ? "merge" : "done";
+  renderView();
+}
+
+function restart() {
+  S.playing = false;
+  stopAnimation();
+  clearTimeout(timer);
+  init();
+  renderView();
+}
+
+const halt = () => { S.playing = false; clearTimeout(timer); };
+$("#try").value = S.tryText;
+$("#next").onclick = () => { halt(); next(); };
+$("#back").onclick = () => { halt(); back(); };
+$("#skip").onclick = () => { halt(); skip(5); };
+$("#finish").onclick = () => { halt(); skip(Infinity); };
+$("#reset").onclick = restart;
+$("#play").onclick = () => {
+  S.playing = !S.playing;
+  renderControls();
+  if (!S.playing) clearTimeout(timer);
+  else if (!S.animating) next();
+};
+$("#try").oninput = e => { S.tryText = e.target.value; renderTry(); };
+$("#showids").onchange = e => { document.body.classList.toggle("ids", e.target.checked); if (!S.animating) drawBrackets(); };
+let rz;
+addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if (!S.animating) drawBrackets(); }, 120); });
+
+const Q0 = [0.8, 0.3, -0.5, 0.9, 0.6, -0.4, 0.2, 0.7];
+const K0 = [0.5, 0.6, 0.7, 0.2, -0.3, 0.8, 0.9, 0.1];
+const TH8 = [0, 1, 2, 3].map(i => 10000 ** (-2 * i / 8));
+const PAIR_HUES = [262, 195, 140, 330];
+const num = v => (v < 0 ? "−" : "") + Math.abs(v).toFixed(2);
+const deg = r => (r * 180 / Math.PI).toFixed(r < 0.01 ? 2 : 1) + "°";
+const pairsOf = v => [0, 1, 2, 3].map(i => [v[2 * i], v[2 * i + 1]]);
+const rot2 = ([x, y], a) => [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)];
+const ang2 = ([x, y]) => Math.atan2(y, x);
+
+const MW = 880, MH = 400, CW = 62, CH = 30, SM = 0.68, R0 = 68;
+const DIAL_TOP = 150, CY = DIAL_TOP + 24 + 100, SUM_Y = 590;
+const gx = (j, grouped) => grouped ? 140 + Math.floor(j / 2) * 175 + (j % 2) * 68 : 140 + j * 70;
+const dialX = i => 15 + i * 217;
+const cxOf = i => dialX(i) + 100;
+const sumX = j => 115 + j * 84;
+const MX = {step: 0, m: 5, n: 2, t: 0, raf: 0, animating: false, E: null, shown: false};
+
+const MX_STEPS = [
+  {h: "The query and the key", next: "Group into pairs",
+    text: () => `Inside attention, every token gets a query (what it’s looking for) and a key (what it offers). Here’s a tiny pair with 8 numbers each; real heads use 64 or 128. The query belongs to the token at position ${MX.m}, the key to the token at position ${MX.n}.`},
+  {h: "Group the numbers into pairs", next: "Plot each pair",
+    text: () => "Numbers 1 and 2 become pair 0, numbers 3 and 4 pair 1, and so on. Each pair will get its own flat plane."},
+  {h: "Each pair becomes a point on a plane", next: "Rotate",
+    text: () => "In each pair, the first number says how far across and the second how far up. Blue is the query’s point, orange the key’s. The dashed circle has radius 1, for scale."},
+  {h: "Rotate", next: "Read the numbers back",
+    text: () => `Each point turns around the centre: the query by ${MX.m} × its pair’s speed, the key by ${MX.n} × it. Pair 0 is fast (57° per position), pair 3 barely moves. Watch the numbers change as the points move; their distance from the centre never does.`},
+  {h: "Read the new numbers back off", next: "Start over",
+    text: () => "The turned points give new numbers: the rotated query q′ and the rotated key k′. (The value vector is never rotated.) Comparing them is attention’s job; that happens in chapter 5."}
+];
+
+function mxBuild() {
+  const inner = $("#mx-inner");
+  const mk = (cls, text = "") => { const d = document.createElement("div"); d.className = "mx " + cls; d.textContent = text; inner.appendChild(d); return d; };
+  const n = (k, f) => Array.from({length: k}, (_, i) => f(i));
+  const E = {inner};
+  E.box = n(4, i => { const b = mk("mx-box"); b.style.setProperty("--pc", PAIR_HUES[i]); b.innerHTML = `<span>pair ${i}</span>`; return b; });
+  E.lq = mk("mx-lbl"); E.lk = mk("mx-lbl"); E.lp = mk("mx-lbl");
+  E.q = n(8, () => mk("nc nq")); E.k = n(8, () => mk("nc nk"));
+  E.times = n(8, () => mk("mx-glyph", "×")); E.eqs = n(8, () => mk("mx-glyph", "="));
+  E.prod = n(8, () => mk("nc np")); E.plus = n(7, () => mk("mx-glyph", "+"));
+  E.sumEq = mk("mx-glyph", "="); E.sum = mk("nc ns");
+  E.scaleTxt = mk("mx-text", "divided by √8 ="); E.score = mk("nc ns");
+  MX.E = E;
+}
+
+function put(el, x, y, o = 1, s = 1, d = 0) {
+  el.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) scale(${s})`;
+  el.style.opacity = o;
+  el.style.transitionDelay = d + "ms";
+}
+
+function planeSpots(i, [x, y]) {
+  const px = cxOf(i) + x * R0, py = CY - y * R0, L = Math.hypot(x, y);
+  const dx = L > .15 ? x / L : 0, dy = L > .15 ? -y / L : -1;
+  const w = CW * SM, h = CH * SM;
+  let lx = px + dx * (w + 8), ly = py + dy * (h + 4);
+  lx = Math.min(Math.max(lx, dialX(i) + w + 3), dialX(i) + 197 - w);
+  ly = Math.min(Math.max(ly, DIAL_TOP + 28 + h / 2), DIAL_TOP + 222 - h / 2);
+  return [[lx - w - 1, ly - h / 2], [lx + 1, ly - h / 2]];
+}
+
+function mxRotated(v, pos) { return pairsOf(v).flatMap((p, i) => rot2(p, pos * TH8[i] * MX.t)); }
+
+function mxLayout() {
+  const {step, E} = MX;
+  const q = mxRotated(Q0, MX.m), k = mxRotated(K0, MX.n);
+  const grouped = step >= 1, inPlane = step === 2 || step === 3, comp = step >= 5;
+  const fade = step >= 6 ? .3 : 1;
+  E.lq.textContent = step >= 4 ? "q′, rotated" : "q, query";
+  E.lk.textContent = step >= 4 ? "k′, rotated" : "k, key";
+  E.lp.textContent = step >= 6 ? "sum" : "q′ × k′";
+  put(E.lq, 10, comp ? 410 : 34, comp ? fade : 1);
+  put(E.lk, 10, comp ? 460 : 76, comp ? fade : 1);
+  put(E.lp, 10, step >= 6 ? SUM_Y : 512, step >= 5 ? 1 : 0);
+  E.box.forEach((b, i) => put(b, gx(2 * i, true) - 8, 24, step === 1 || step === 4 ? 1 : inPlane ? .25 : 0));
+  const qp = pairsOf(q), kp = pairsOf(k);
+  for (let j = 0; j < 8; j++) {
+    const pair = j >> 1, side = j % 2;
+    [[E.q[j], q, qp, 34, 410], [E.k[j], k, kp, 76, 460]].forEach(([el, v, pp, rowY, compY]) => {
+      el.textContent = num(v[j]);
+      if (inPlane) {
+        const [x, y] = planeSpots(pair, pp[pair])[side];
+        put(el, x, y, 1, SM, step === 2 ? pair * 140 + side * 40 : 0);
+      } else if (comp) put(el, gx(j, true), compY, fade, 1, j * 40);
+      else put(el, gx(j, grouped), rowY, 1, 1, step === 4 ? pair * 120 + side * 40 : 0);
+    });
+    const gxj = gx(j, true);
+    const glyphO = step === 5 ? 1 : step >= 6 ? .3 : 0;
+    put(E.times[j], gxj + 21, 441, glyphO, 1, step === 5 ? 500 : 0);
+    put(E.eqs[j], gxj + 21, 491, glyphO, 1, step === 5 ? 700 : 0);
+    E.prod[j].textContent = num(q[j] * k[j]);
+    if (step < 5) put(E.prod[j], gxj, 486, 0);
+    else if (step === 5) put(E.prod[j], gxj, 512, 1, 1, 800 + j * 70);
+    else put(E.prod[j], sumX(j), SUM_Y, 1, 1, j * 70);
+  }
+  E.plus.forEach((p, j) => put(p, sumX(j) + 63, SUM_Y + 4, step >= 6 ? 1 : 0, 1, step >= 6 ? 700 : 0));
+  const total = q.reduce((t, x, j) => t + x * k[j], 0);
+  E.sum.textContent = num(total);
+  E.score.textContent = num(total / Math.sqrt(8));
+  put(E.sumEq, sumX(7) + 63, SUM_Y + 4, step >= 6 ? 1 : 0, 1, step >= 6 ? 1000 : 0);
+  put(E.sum, sumX(7) + 88, step >= 6 ? SUM_Y : SUM_Y + 20, step >= 6 ? 1 : 0, 1, step >= 6 ? 1200 : 0);
+  put(E.scaleTxt, sumX(7) - 40, SUM_Y + 60, step >= 7 ? 1 : 0, 1, step >= 7 ? 200 : 0);
+  put(E.score, sumX(7) + 88, step >= 7 ? SUM_Y + 54 : SUM_Y + 74, step >= 7 ? 1 : 0, 1, step >= 7 ? 500 : 0);
+  const axes = $("#mx-axes"), vec = $("#mx-vec");
+  axes.style.opacity = step < 2 ? 0 : step >= 5 ? .3 : 1;
+  vec.style.opacity = step < 2 ? 0 : step >= 5 ? .3 : 1;
+  vec.style.transitionDelay = step === 2 ? "900ms" : "0ms";
+  mxVec();
+}
+
+function arcEl(cx, cy, r, from, sweep, style) {
+  const s = sweep % (2 * Math.PI);
+  if (s < 1e-3) return "";
+  if (s > 2 * Math.PI - 1e-2) return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" style="${style}"/>`;
+  const p = a => `${(cx + r * Math.cos(a)).toFixed(1)} ${(cy - r * Math.sin(a)).toFixed(1)}`;
+  return `<path d="M${p(from)} A ${r} ${r} 0 ${s > Math.PI ? 1 : 0} 0 ${p(from + s)}" fill="none" style="${style}"/>`;
+}
+
+function mxAxes() {
+  $("#mx-axes").innerHTML = [0, 1, 2, 3].map(i => {
+    const x0 = dialX(i), cx = cxOf(i), hue = PAIR_HUES[i];
+    return `<rect x="${x0}" y="${DIAL_TOP}" width="200" height="226" rx="12" fill="none" style="stroke:hsl(${hue} 60% 55%)" stroke-width="2"/>
+      <text x="${x0 + 12}" y="${DIAL_TOP + 18}" font-size="12" font-weight="600" style="fill:hsl(${hue} 55% 52%)">Pair ${i}</text>
+      <text x="${x0 + 188}" y="${DIAL_TOP + 18}" text-anchor="end" font-size="11" style="fill:var(--muted)">turns ${deg(TH8[i])} per position</text>
+      <line x1="${x0 + 8}" x2="${x0 + 192}" y1="${CY}" y2="${CY}" style="stroke:var(--rule)"/>
+      <line x1="${cx}" x2="${cx}" y1="${DIAL_TOP + 28}" y2="${DIAL_TOP + 222}" style="stroke:var(--rule)"/>
+      <circle cx="${cx}" cy="${CY}" r="${R0}" fill="none" style="stroke:var(--rule)" stroke-dasharray="4 4"/>`;
+  }).join("");
+}
+
+function mxVec() {
+  const t = MX.t;
+  $("#mx-vec").innerHTML = [0, 1, 2, 3].map(i => {
+    const cx = cxOf(i), q = pairsOf(Q0)[i], k = pairsOf(K0)[i];
+    const qa = MX.m * TH8[i] * t, ka = MX.n * TH8[i] * t;
+    const rq = rot2(q, qa), rk = rot2(k, ka);
+    const P = ([x, y]) => [(cx + x * R0).toFixed(1), (CY - y * R0).toFixed(1)];
+    const arrow = (v, color, ghost) => {
+      const [x, y] = P(v);
+      return ghost
+        ? `<line x1="${cx}" y1="${CY}" x2="${x}" y2="${y}" style="stroke:${color}" stroke-width="1.5" stroke-dasharray="3 3" opacity=".45"/>`
+        : `<line x1="${cx}" y1="${CY}" x2="${x}" y2="${y}" style="stroke:${color}" stroke-width="3" stroke-linecap="round"/><circle cx="${x}" cy="${y}" r="5" style="fill:${color}"/>`;
+    };
+    const guides = (v, color) => {
+      const [x, y] = P(v);
+      return `<path d="M${x} ${y} V${CY} M${x} ${y} H${cx}" fill="none" style="stroke:${color}" stroke-width="1" stroke-dasharray="2 3" opacity=".55"/>`;
+    };
+    const turned = t > 0.001;
+    return (turned ? arrow(q, "var(--accent)", true) + arrow(k, "var(--hl)", true)
+        + arcEl(cx, CY, 18, ang2(q), qa, "stroke:var(--accent);stroke-width:1.5") + arcEl(cx, CY, 26, ang2(k), ka, "stroke:var(--hl);stroke-width:1.5") : "")
+      + guides(rk, "var(--hl)") + guides(rq, "var(--accent)") + arrow(rk, "var(--hl)") + arrow(rq, "var(--accent)");
+  }).join("");
+}
+
+function mxText() {
+  const s = MX_STEPS[MX.step];
+  $("#mx-stepno").textContent = `Step ${MX.step + 1} of ${MX_STEPS.length}`;
+  $("#mx-h").textContent = s.h;
+  $("#mx-text").textContent = s.text();
+  $("#mx-m-v").textContent = MX.m;
+  $("#mx-n-v").textContent = MX.n;
+}
+
+function mxControls() {
+  const locked = MX.step >= 3;
+  $("#mx-back").disabled = MX.step === 0 || MX.animating;
+  $("#mx-next").disabled = MX.animating;
+  $("#mx-next").textContent = MX_STEPS[MX.step].next;
+  $("#mx-m").disabled = $("#mx-n").disabled = locked;
+  $("#mx-lock").textContent = locked ? "Positions are fixed once the points have turned. Go back to step 3 to change them." : "";
+}
+
+function mxAnimateT(target, dur) {
+  cancelAnimationFrame(MX.raf);
+  if (reduceMotion) { MX.t = target; mxLayout(); return; }
+  const from = MX.t, t0 = performance.now();
+  MX.animating = true;
+  MX.E.inner.classList.add("live");
+  mxControls();
+  const tick = now => {
+    const p = Math.min(1, (now - t0) / dur), e = p < .5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2;
+    MX.t = from + (target - from) * e;
+    mxLayout();
+    if (p < 1) { MX.raf = requestAnimationFrame(tick); return; }
+    MX.animating = false;
+    MX.E.inner.classList.remove("live");
+    mxControls();
+  };
+  MX.raf = requestAnimationFrame(tick);
+}
+
+function mxGo(step) {
+  if (MX.animating) return;
+  const prev = MX.step;
+  MX.step = (step + MX_STEPS.length) % MX_STEPS.length;
+  mxText();
+  mxControls();
+  if (MX.step === 3 && prev === 2) return mxAnimateT(1, 2800);
+  if (MX.step === 2 && prev === 3) return mxAnimateT(0, 1800);
+  if (MX.step === 0) MX.t = 0;
+  mxLayout();
+}
+
+function mxScale() {
+  const stage = $("#mx-stage"), s = Math.min(1, stage.clientWidth / MW);
+  MX.E.inner.style.transform = `scale(${s})`;
+  stage.style.height = MH * s + "px";
+}
+
+function mxShow() {
+  mxScale();
+  if (MX.shown) return;
+  MX.shown = true;
+  MX.E.inner.classList.add("live");
+  mxAxes();
+  mxText();
+  mxControls();
+  mxLayout();
+  MX.E.inner.offsetHeight;
+  MX.E.inner.classList.remove("live");
+}
+
+const ROPE = {theta: [1, 10000 ** (-8 / 64), 0.1, 0.01], pairIdx: [0, 4, 8, 16], kind: "prev"};
+
+function ropePreset(kind) {
+  const T = ROPE.theta, rnd = () => Math.random();
+  ROPE.kind = kind;
+  if (kind === "prev") {
+    ROPE.a = [1, .8, .35, .25]; ROPE.b = [...ROPE.a];
+    ROPE.alpha = [.6, 2, -1, 1.2]; ROPE.beta = ROPE.alpha.map((x, i) => x + T[i]);
+  } else if (kind === "content") {
+    ROPE.a = [.25, .3, .6, 1]; ROPE.b = [...ROPE.a];
+    ROPE.alpha = [.6, 2, -1, 1.2]; ROPE.beta = [...ROPE.alpha];
+  } else {
+    ROPE.a = T.map(() => .3 + .7 * rnd()); ROPE.b = T.map(() => .3 + .7 * rnd());
+    ROPE.alpha = T.map(() => rnd() * 2 * Math.PI); ROPE.beta = T.map(() => rnd() * 2 * Math.PI);
+  }
+  document.querySelectorAll("[data-rope]").forEach(b => b.setAttribute("aria-pressed", b.dataset.rope === kind));
+  renderRope();
+}
+
+const wrapAngle = x => Math.atan2(Math.sin(x), Math.cos(x));
+const ropeScore = d => ROPE.theta.reduce((t, th, i) => t + ROPE.a[i] * ROPE.b[i] * Math.cos(ROPE.alpha[i] - ROPE.beta[i] + d * th), 0);
+
+function dialSVG(i, M, N) {
+  const c = 75, R = 58, th = ROPE.theta[i];
+  const pt = (ang, len) => [c + Math.cos(ang) * R * len, c - Math.sin(ang) * R * len].map(v => v.toFixed(1));
+  const qa = ROPE.alpha[i] + M * th, ka = ROPE.beta[i] + N * th, diff = wrapAngle(qa - ka);
+  const line = (ang, len, color, ghost) => {
+    const [x, y] = pt(ang, len);
+    return ghost
+      ? `<line x1="${c}" y1="${c}" x2="${x}" y2="${y}" style="stroke:${color}" stroke-width="2" stroke-dasharray="3 3" opacity=".35"/>`
+      : `<line x1="${c}" y1="${c}" x2="${x}" y2="${y}" style="stroke:${color}" stroke-width="3.5" stroke-linecap="round"/><circle cx="${x}" cy="${y}" r="4.5" style="fill:${color}"/>`;
+  };
+  const [ax, ay] = pt(ka, .36), [bx, by] = pt(qa, .36);
+  const [lx, ly] = pt(ka + diff / 2, .62);
+  return `<svg viewBox="0 0 150 150" aria-hidden="true">
+    <circle cx="${c}" cy="${c}" r="${R}" fill="none" style="stroke:var(--rule)" stroke-width="1.5"/>
+    ${line(ROPE.alpha[i], ROPE.a[i], "var(--accent)", true)}${line(ROPE.beta[i], ROPE.b[i], "var(--hl)", true)}
+    <path d="M${ax} ${ay} A ${(R * .36).toFixed(1)} ${(R * .36).toFixed(1)} 0 0 ${diff > 0 ? 0 : 1} ${bx} ${by}" fill="none" style="stroke:var(--muted)" stroke-width="1.5"/>
+    ${line(ka, ROPE.b[i], "var(--hl)")}${line(qa, ROPE.a[i], "var(--accent)")}
+    <text x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle" font-size="11" style="fill:var(--ink)">${Math.round(diff * 180 / Math.PI)}°</text>
+  </svg>`;
+}
+
+function renderRope() {
+  const m = +$("#rope-m").value, n = +$("#rope-n").value, s = +$("#rope-s").value;
+  const M = m + s, N = n + s, d = m - n;
+  $("#rope-m-v").textContent = M;
+  $("#rope-n-v").textContent = N;
+  $("#rope-s-v").textContent = s;
+  $("#rope-dials").innerHTML = ROPE.theta.map((th, i) => {
+    return `<div class="dial"><div class="nm">Pair ${ROPE.pairIdx[i]}${i === 0 ? ", fastest" : i === 3 ? ", slow" : ""}</div>
+      <div class="sp">turns ${(th * 180 / Math.PI).toFixed(th < .05 ? 2 : 1)}° per position</div>
+      ${dialSVG(i, M, N)}</div>`;
+  }).join("");
+  $("#rope-total").innerHTML = `<div class="note" style="margin:0">Query at position ${M}, key at position ${N}, so they are ${d} apart.${d < 0 ? " (The key is after the query; a real model masks this out.)" : ""} Drag “Shift both by”: every arrow turns, but each angle between blue and orange stays exactly the same.</div>`;
+}
+
+
+const EW = 900, ETOK_W = 64, ETOK_H = 40, ECELL_H = 22, ESTEP = 25, EMB_D = 6, VEC_W = 56;
+const ETOK_Y = 6, EVEC_Y = ETOK_Y + ETOK_H + 8, ETAB_TOP = 300;
+const ETAB_HDR_Y = ETAB_TOP + 34, ETAB_CELL_Y = ETAB_HDR_Y + ETOK_H + 8;
+const EH = ETAB_CELL_Y + (EMB_D + 1) * ESTEP + 14;
+const EMB = {sentence: "The cat sat on the mat.", key: null, tk: null, ids: [], geo: [], running: false, done: false, E: null};
+
+function trainAll(text) {
+  let words = (text.match(PAT) || []).map(p => [...enc.encode(p)]);
+  const vocab = Array.from({length: 256}, (_, i) => [i]), merges = [], rank = new Map();
+  for (;;) {
+    const m = new Map();
+    let order = 0;
+    for (const w of words) for (let i = 0; i < w.length - 1; i++) {
+      const key = w[i] + "," + w[i + 1], p = m.get(key);
+      if (p) p.c++; else m.set(key, {a: w[i], b: w[i + 1], key, c: 1, f: order++});
+    }
+    const best = [...m.values()].sort((x, y) => y.c - x.c || x.f - y.f)[0];
+    if (!best) break;
+    const id = vocab.length;
+    vocab.push([...vocab[best.a], ...vocab[best.b]]);
+    merges.push({a: best.a, b: best.b, id});
+    rank.set(best.key, merges.length - 1);
+    words = words.map(w => replacePair(w, best.a, best.b, id));
+  }
+  return {vocab, merges, rank};
+}
+
+function encodeWith(tk, text) {
+  return (text.match(PAT) || []).flatMap(p => {
+    let ids = [...enc.encode(p)];
+    while (ids.length > 1) {
+      let best = -1;
+      for (let i = 0; i < ids.length - 1; i++) {
+        const r = tk.rank.get(ids[i] + "," + ids[i + 1]);
+        if (r !== undefined && (best < 0 || r < best)) best = r;
+      }
+      if (best < 0) break;
+      const m = tk.merges[best];
+      ids = replacePair(ids, m.a, m.b, m.id);
+    }
+    return ids;
+  });
+}
+
+function bytesLabel(bytes) {
+  try { return vis(dec.decode(new Uint8Array(bytes))); }
+  catch { return bytes.map(b => b < 128 ? vis(String.fromCharCode(b)) : "‹" + hex(b) + "›").join(""); }
+}
+
+const embHue = id => id < 256 ? 0 : Math.round(((id - 256) * 137.508) % 360);
+const embVal = (id, r) => { const x = Math.sin(id * 12.9898 + r * 78.233 + 1.7) * 43758.5453; return ((x - Math.floor(x)) * 2 - 1) * 0.9; };
+const tr = (x, y, extra = "") => `translate(${x.toFixed(1)}px,${y.toFixed(1)}px)${extra}`;
+
+function embColumns(ids) {
+  const last = EMB.tk.vocab.length - 1;
+  const set = [...new Set([0, 1, 2, ...ids, last])].sort((a, b) => a - b);
+  const cols = [];
+  set.forEach((id, i) => { if (i && id > set[i - 1] + 1) cols.push(null); cols.push(id); });
+  return cols;
+}
+
+function embTokX(i) {
+  const n = EMB.ids.length, step = 84;
+  return (EW - (n * step - 20)) / 2 + i * step;
+}
+
+function embEl(cls, x, y, html = "", style = "") {
+  const d = document.createElement("div");
+  d.className = "e-abs " + cls;
+  d.style.cssText = `transform:${tr(x, y)};${style}`;
+  d.innerHTML = html;
+  EMB.E.inner.appendChild(d);
+  return d;
+}
+
+function embBuild() {
+  const tk = EMB.tk, all = encodeWith(tk, EMB.sentence);
+  EMB.ids = all.slice(0, 10);
+  EMB.cut = all.length - EMB.ids.length;
+  EMB.done = false;
+  const cols = embColumns(EMB.ids), DOT_W = 24;
+  const nData = cols.filter(c => c !== null).length, nDots = cols.length - nData;
+  const W = Math.min(66, (EW - 30 - nDots * DOT_W) / nData);
+  let x = 0;
+  EMB.geo = cols.map(id => { const g = {id, x, w: id === null ? DOT_W : W}; x += g.w; return g; });
+  const off = (EW - x) / 2;
+  EMB.geo.forEach(g => g.x += off);
+  const inner = $("#emb-inner");
+  inner.innerHTML = "";
+  inner.style.height = EH + "px";
+  EMB.E = {inner, hdr: new Map(), cells: new Map(), tok: [], vecs: []};
+  embEl("etab", off - 10, ETAB_TOP, "", `width:${x + 20}px;height:${EH - ETAB_TOP - 4}px`);
+  embEl("etab-t", off, ETAB_TOP + 10, `The embedding table: one learned column for every token id, ${tk.vocab.length} columns in all. GPT-2 small has 50,257 columns of 768 numbers; 6 numbers shown.`);
+  const small = W < 54;
+  EMB.geo.forEach(g => {
+    if (g.id === null) {
+      embEl("edots", g.x, ETAB_HDR_Y + 10, "…", `width:${g.w}px`);
+      embEl("edots", g.x, ETAB_CELL_Y + 2.5 * ESTEP, "…", `width:${g.w}px`);
+      return;
+    }
+    const h = embHue(g.id);
+    EMB.E.hdr.set(g.id, embEl(`tok ech ${g.id < 256 ? "base" : ""}`, g.x + 3, ETAB_HDR_Y,
+      `${esc(bytesLabel(tk.vocab[g.id]))}<sub>${g.id}</sub>`, `--h:${h};width:${g.w - 6}px;${small ? "font-size:11px" : ""}`));
+    EMB.E.cells.set(g.id, Array.from({length: EMB_D}, (_, r) =>
+      embEl(`ecell ${small ? "small" : ""}`, g.x + 3, ETAB_CELL_Y + r * ESTEP, num(embVal(g.id, r)), `width:${g.w - 6}px`)));
+    embEl("edots", g.x, ETAB_CELL_Y + EMB_D * ESTEP - 2, "⋮", `width:${g.w}px`);
+  });
+  EMB.E.tok = EMB.ids.map((id, i) => embEl(`tok ech ${id < 256 ? "base" : ""}`, embTokX(i), ETOK_Y,
+    `${esc(bytesLabel(tk.vocab[id]))}<sub>${id}</sub>`, `--h:${embHue(id)};width:${ETOK_W}px;z-index:3`));
+  embStatus();
+  embControls();
+  embScale();
+}
+
+function embStatus() {
+  const n = EMB.ids.length;
+  $("#emb-status").textContent = EMB.done
+    ? `${n} tokens became ${n} vectors, one column each. In a real model each vector has hundreds to thousands of numbers (768 in GPT-2 small). This list of vectors is what the first layer receives.`
+    : `${n} tokens from your sentence${EMB.cut ? ` (the first 10 of ${n + EMB.cut})` : ""}, tokenized with the chapter 1 tokenizer trained to the end on its training text.`;
+}
+
+function embControls() {
+  $("#emb-play").disabled = EMB.running;
+  $("#emb-reset").disabled = EMB.running;
+  $("#emb-use").disabled = EMB.running;
+  $("#emb-play").textContent = EMB.done ? "Look them up again" : "Look up the embeddings";
+}
+
+function embScale() {
+  const stage = $("#emb-stage"), s = Math.min(1, stage.clientWidth / EW);
+  EMB.E.inner.style.transform = `scale(${s})`;
+  stage.style.height = EH * s + "px";
+}
+
+const settle = (el, anim, transform) => anim.finished.then(() => { el.style.transform = transform; anim.cancel(); });
+
+async function embLookup(i, s) {
+  const id = EMB.ids[i], g = EMB.geo.find(c => c.id === id), tok = EMB.E.tok[i];
+  const home = [embTokX(i), ETOK_Y], hit = [g.x + (g.w - ETOK_W) / 2, ETAB_HDR_Y - ETOK_H - 2];
+  if (reduceMotion) s = 0.01;
+  await settle(tok, tok.animate([{transform: tr(...home)}, {transform: tr(...hit)}],
+    {duration: 620 * s, easing: "cubic-bezier(.55,0,.95,.5)"}), tr(...hit));
+  const hdr = EMB.E.hdr.get(id), hdrT = hdr.style.transform;
+  hdr.animate([{transform: hdrT}, {transform: hdrT + " scale(1.08, .9)"}, {transform: hdrT}], {duration: 320 * s});
+  const cells = EMB.E.cells.get(id);
+  cells.forEach(c => c.classList.add("hit"));
+  setTimeout(() => cells.forEach(c => c.classList.remove("hit")), 500 * s + 150);
+  const vx = embTokX(i) + (ETOK_W - VEC_W) / 2;
+  const clones = cells.map((c, r) => {
+    const from = [g.x + (g.w - VEC_W) / 2, ETAB_CELL_Y + r * ESTEP], to = [vx, EVEC_Y + r * ESTEP];
+    const el = embEl(`ecell vec ${id < 256 ? "base" : ""}`, ...from, c.textContent, `--h:${embHue(id)};width:${VEC_W}px;z-index:2`);
+    return settle(el, el.animate([{transform: tr(...from), opacity: .4}, {transform: tr(...to), opacity: 1}],
+      {duration: 820 * s, delay: (80 + r * 45) * s, easing: "cubic-bezier(.2,.75,.3,1)", fill: "backwards"}), tr(...to));
+  });
+  const up = settle(tok, tok.animate([
+    {transform: tr(...hit, " scale(1.12,.8)"), offset: 0},
+    {transform: tr(...hit, " scale(1)"), offset: .1},
+    {transform: tr(...home)}], {duration: 760 * s, easing: "cubic-bezier(.2,.7,.35,1)"}), tr(...home));
+  await Promise.all([up, ...clones]);
+  embEl("edots", vx, EVEC_Y + EMB_D * ESTEP - 2, "⋮", `width:${VEC_W}px`);
+}
+
+async function embRun() {
+  if (EMB.running) return;
+  if (EMB.done) embBuild();
+  EMB.running = true;
+  embControls();
+  let s = 1;
+  for (let i = 0; i < EMB.ids.length; i++) {
+    await embLookup(i, s);
+    s = Math.max(0.16, s * 0.7);
+  }
+  EMB.running = false;
+  EMB.done = true;
+  embStatus();
+  embControls();
+}
+
+function embShow() {
+  if (EMB.running) return embScale();
+  if (EMB.key !== S.text) {
+    EMB.key = S.text;
+    EMB.tk = trainAll(S.text);
+    embBuild();
+  } else embScale();
+}
+
+const N3_G = [1.6, 0.6, 1.1], N3_LEN = [0.7, 2.6, 1.2, 3.0, 0.5, 2.0, 1.4], N3_R = Math.sqrt(3);
+const N3_U = 72, N3_CX = 320, N3_CY = 242;
+const N3 = {step: 0, t1: 0, t2: 0, yaw: -0.7, pitch: 0.38, auto: !reduceMotion, drag: null, raf: 0, anim: 0, ids: [], vecs: [], key: null};
+const N3_STEPS = [
+  {h: "Each token’s vector is an arrow", next: "Divide by the RMS",
+    text: "With 3 numbers per vector, each token’s vector can be drawn as an arrow in 3D: the numbers say how far to go along each axis. Arrows arriving at a layer have very different lengths. Drag the picture to turn it."},
+  {h: "Divide by the RMS: every arrow lands on a sphere", next: "Stretch by g",
+    text: "Each arrow slides along its own line, keeping its direction, until its tip touches a sphere of radius √d. Here d = 3, so the radius is √3 ≈ 1.73. That’s because length = √d × RMS, so dividing by the RMS always leaves length √d. The faint dots show where each tip started."},
+  {h: "Multiply by g: stretch each axis", next: "Start over",
+    text: `Each axis is stretched by its own learned factor, here g = (${N3_G.join(", ")}). The sphere becomes an ellipsoid, and every tip moves with it. The same g is used for every token, so all tokens end up on this one ellipsoid; they differ only in where on it they sit.`}
+];
+
+function n3Setup() {
+  if (EMB.key !== S.text) { EMB.key = S.text; EMB.tk = trainAll(S.text); embBuild(); }
+  const key = EMB.ids.join(",");
+  if (N3.key === key) return;
+  N3.key = key;
+  N3.ids = EMB.ids.slice(0, 7);
+  N3.vecs = N3.ids.map((id, i) => {
+    const v = [1, 3, 5].map(r => embVal(id, r));
+    const L = Math.hypot(...v) || 1;
+    return v.map(a => a / L * N3_LEN[i % N3_LEN.length]);
+  });
+}
+
+const lerp = (a, b, t) => a + (b - a) * t;
+const n3Rms = v => Math.hypot(...v) / Math.sqrt(3);
+const n3Tip = (v, t1, t2) => { const k = lerp(1, 1 / n3Rms(v), t1); return v.map((a, j) => a * k * lerp(1, N3_G[j], t2)); };
+
+function n3Proj([x, y, z]) {
+  const cy = Math.cos(N3.yaw), sy = Math.sin(N3.yaw), cp = Math.cos(N3.pitch), sp = Math.sin(N3.pitch);
+  const x1 = x * cy - y * sy, y1 = x * sy + y * cy;
+  const y2 = y1 * cp - z * sp, z2 = y1 * sp + z * cp;
+  return [N3_CX + x1 * N3_U, N3_CY - z2 * N3_U, y2];
+}
+
+function n3Outline(o, cols) {
+  const a = cols.reduce((t, c) => t + c[0] * c[0], 0), b = cols.reduce((t, c) => t + c[0] * c[1], 0), d = cols.reduce((t, c) => t + c[1] * c[1], 0);
+  const mid = (a + d) / 2, spread = Math.sqrt(((a - d) / 2) ** 2 + b * b);
+  const l1 = mid + spread, l2 = Math.max(mid - spread, 0);
+  let e = Math.abs(b) < 1e-9 ? (a >= d ? [1, 0] : [0, 1]) : [b, l1 - a];
+  const n = Math.hypot(...e);
+  e = [e[0] / n, e[1] / n];
+  const f = [-e[1], e[0]], r1 = Math.sqrt(l1), r2 = Math.sqrt(l2);
+  let path = "";
+  for (let k = 0; k <= 72; k++) {
+    const t = k / 72 * 2 * Math.PI, c = Math.cos(t), sn = Math.sin(t);
+    path += (k ? "L" : "M") + (o[0] + e[0] * r1 * c + f[0] * r2 * sn).toFixed(1) + " " + (o[1] + e[1] * r1 * c + f[1] * r2 * sn).toFixed(1);
+  }
+  return {path: path + "Z", r1, r2};
+}
+
+function n3Fill(t2, alpha) {
+  if (alpha < 0.01) return {defs: "", shadow: "", body: "", lines: ""};
+  const s = N3_G.map(g => N3_R * lerp(1, g, t2)), o = n3Proj([0, 0, 0]);
+  const col = (c, v) => { const p = n3Proj(v.map((x, j) => x + c[j])), q = n3Proj(c); return [p[0] - q[0], p[1] - q[1]]; };
+  const body = n3Outline(o, [0, 1, 2].map(j => { const e = [0, 0, 0]; e[j] = s[j]; return col([0, 0, 0], e); }));
+  const fc = [0, 0, -(s[2] + 0.45)], shadow = n3Outline(n3Proj(fc), [col(fc, [s[0], 0, 0]), col(fc, [0, s[1], 0])]);
+  const R = Math.max(body.r1, 1);
+  const defs = `<radialGradient id="n3g" gradientUnits="userSpaceOnUse" cx="${(o[0] - R * .28).toFixed(1)}" cy="${(o[1] - R * .32).toFixed(1)}" r="${(R * 1.45).toFixed(1)}" fx="${(o[0] - R * .4).toFixed(1)}" fy="${(o[1] - R * .45).toFixed(1)}">
+      <stop offset="0" style="stop-color:color-mix(in srgb,var(--accent) 15%,white)"/>
+      <stop offset=".3" style="stop-color:color-mix(in srgb,var(--accent) 55%,white)"/>
+      <stop offset=".72" style="stop-color:var(--accent)"/>
+      <stop offset="1" style="stop-color:color-mix(in srgb,var(--accent) 45%,black)"/>
+    </radialGradient>
+    <radialGradient id="n3s"><stop offset="0" style="stop-color:var(--ink);stop-opacity:.22"/><stop offset="1" style="stop-color:var(--ink);stop-opacity:0"/></radialGradient>`;
+  const ring = pts => {
+    let d = "";
+    for (let k = 0; k < pts.length - 1; k++) {
+      const a = n3Proj(pts[k]), b = n3Proj(pts[k + 1]);
+      if (a[2] + b[2] < 0) d += `M${a[0].toFixed(1)} ${a[1].toFixed(1)}L${b[0].toFixed(1)} ${b[1].toFixed(1)}`;
+    }
+    return d;
+  };
+  const circle = f => Array.from({length: 73}, (_, k) => f(k / 72 * 2 * Math.PI));
+  const lines = ring(circle(t => [s[0] * Math.cos(t), s[1] * Math.sin(t), 0]))
+    + ring(circle(t => [s[0] * Math.cos(t), 0, s[2] * Math.sin(t)]))
+    + ring(circle(t => [0, s[1] * Math.cos(t), s[2] * Math.sin(t)]));
+  return {
+    defs,
+    shadow: `<path d="${shadow.path}" fill="url(#n3s)" opacity="${alpha.toFixed(2)}"/>`,
+    body: `<path d="${body.path}" fill="url(#n3g)" opacity="${(alpha * .78).toFixed(2)}"/>`,
+    lines: `<path d="${lines}" fill="none" style="stroke:white" stroke-width="1.2" opacity="${(alpha * .45).toFixed(2)}"/>`
+  };
+}
+
+function n3Draw() {
+  const {t1, t2} = N3, svg = $("#n3");
+  const A = 3.1, axisNames = ["1st number", "2nd number", "3rd number"];
+  let html = "";
+  [[1, 0, 0], [0, 1, 0], [0, 0, 1]].forEach((u, j) => {
+    const a = n3Proj(u.map(c => -c * A)), b = n3Proj(u.map(c => c * A));
+    html += `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" style="stroke:var(--muted)" stroke-width="1" opacity=".55"/>`;
+  });
+  const sphereAlpha = Math.min(1, t1 * 1.6);
+  if (sphereAlpha > .3 && t2 < .5) {
+    const top = n3Proj([0, 0, N3_R]), o = n3Proj([0, 0, 0]);
+    html += `<line x1="${o[0]}" y1="${o[1]}" x2="${top[0]}" y2="${top[1]}" style="stroke:var(--accent)" stroke-width="1.5" stroke-dasharray="4 3" opacity="${sphereAlpha * (1 - t2 * 2)}"/>
+      <text x="${top[0]}" y="${top[1]}" dx="6" dy="-6" font-size="12.5" class="n3-t" style="fill:var(--accent)" opacity="${sphereAlpha * (1 - t2 * 2)}">radius √3 ≈ 1.73</text>`;
+  }
+  const o = n3Proj([0, 0, 0]);
+  let back = "", front = "";
+  const items = N3.vecs.map((v, i) => ({v, i, tip: n3Proj(n3Tip(v, t1, t2)), orig: n3Proj(v)})).sort((a, b) => b.tip[2] - a.tip[2]);
+  items.forEach(({i, tip, orig}) => {
+    const id = N3.ids[i], color = id < 256 ? "var(--muted)" : `hsl(${embHue(id)} 60% 50%)`;
+    let part = "";
+    if (t1 > 0.02) part += `<line x1="${tip[0]}" y1="${tip[1]}" x2="${orig[0]}" y2="${orig[1]}" style="stroke:${color}" stroke-width="1" stroke-dasharray="2 3" opacity=".5"/><circle cx="${orig[0]}" cy="${orig[1]}" r="3.5" style="fill:${color}" opacity=".35"/>`;
+    part += `<line x1="${o[0]}" y1="${o[1]}" x2="${tip[0]}" y2="${tip[1]}" style="stroke:${color}" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="${tip[0]}" cy="${tip[1]}" r="5.5" style="fill:${color}"/>
+      <text x="${tip[0]}" y="${tip[1]}" dx="8" dy="-7" font-size="13" font-weight="600" class="n3-t mono" style="fill:${color}">${esc(bytesLabel(EMB.tk.vocab[id]))}</text>`;
+    if (tip[2] > 0 && sphereAlpha > 0.3) back += part; else front += part;
+  });
+  const radius = html.match(/<line[^>]*stroke-dasharray="4 3".*$/s);
+  const axesOnly = radius ? html.slice(0, radius.index) : html;
+  const F = n3Fill(t2, sphereAlpha);
+  svg.innerHTML = `<defs>${F.defs}</defs>` + axesOnly + F.shadow + back + F.body + F.lines + (radius ? radius[0] : "") + front
+    + `<circle cx="${o[0]}" cy="${o[1]}" r="3" style="fill:var(--ink)"/>`;
+}
+
+
+function n3Text() {
+  const s = N3_STEPS[N3.step];
+  $("#n3-stepno").textContent = `Step ${N3.step + 1} of ${N3_STEPS.length}`;
+  $("#n3-h").textContent = s.h;
+  $("#n3-text").textContent = s.text;
+  $("#n3-next").textContent = s.next;
+  $("#n3-back").disabled = N3.step === 0;
+}
+
+function n3Go(step) {
+  N3.step = (step + N3_STEPS.length) % N3_STEPS.length;
+  n3Text();
+  const from = [N3.t1, N3.t2], to = [N3.step >= 1 ? 1 : 0, N3.step >= 2 ? 1 : 0];
+  cancelAnimationFrame(N3.anim);
+  if (reduceMotion) { [N3.t1, N3.t2] = to; return; }
+  const t0 = performance.now(), dur = 1700;
+  const tick = now => {
+    const p = Math.min(1, (now - t0) / dur), e = p < .5 ? 4 * p ** 3 : 1 - (-2 * p + 2) ** 3 / 2;
+    N3.t1 = lerp(from[0], to[0], e);
+    N3.t2 = lerp(from[1], to[1], e);
+    if (p < 1) N3.anim = requestAnimationFrame(tick);
+  };
+  N3.anim = requestAnimationFrame(tick);
+}
+
+function n3Loop() {
+  if (!VISIBLE.has("sec-norm")) { N3.raf = 0; return; }
+  if (N3.ids.length) {
+    if (N3.auto && !N3.drag) N3.yaw += 0.0035;
+    n3Draw();
+  }
+  N3.raf = requestAnimationFrame(n3Loop);
+}
+
+function n3Show() {
+  n3Setup();
+  n3Text();
+  if (!N3.raf) N3.raf = requestAnimationFrame(n3Loop);
+}
+
+function n3Bind() {
+  const svg = $("#n3");
+  svg.addEventListener("pointerdown", e => { N3.drag = {x: e.clientX, y: e.clientY}; N3.auto = false; svg.setPointerCapture(e.pointerId); });
+  svg.addEventListener("pointermove", e => {
+    if (!N3.drag) return;
+    N3.yaw += (e.clientX - N3.drag.x) * 0.01;
+    N3.pitch = Math.max(-1.3, Math.min(1.3, N3.pitch + (e.clientY - N3.drag.y) * 0.01));
+    N3.drag = {x: e.clientX, y: e.clientY};
+  });
+  const end = () => { N3.drag = null; };
+  svg.addEventListener("pointerup", end);
+  svg.addEventListener("pointercancel", end);
+  $("#n3-next").onclick = () => n3Go(N3.step + 1);
+  $("#n3-back").onclick = () => n3Go(N3.step - 1);
+}
+
+const AW = 1000, AHGT = 990, AD = 16, AQ = 16, AHEADS = 4, AHS = 4, ACELL = 10, ACW = 16, ACH = AHS * ACELL, AXH = AD * ACELL;
+const A_THETA = [1, 0.01];
+const A_FACTORS = [0.35, 1.6, 0.8, 2.6, 0.5, 1.9, 1.1];
+const A_MAT = {WQ: [250, 50, AD, AQ], WK: [440, 50, AD, AQ], WV: [630, 50, AD, AQ], WO: [820, 50, AQ, AD]};
+const A_KIND_MAT = {Q: "WQ", K: "WK", V: "WV", A: "WO"};
+const A_GROUP_Y = 260, A_GS = 30, A_GRID_X = 395, A_GRID_Y = 530, A_GSC = .7, A_OUT_X = 395, A_OUT_Y = 770, A_RES_X = 823, A_BOT_Y = 800, A_WB_X = 625, A_TERM = 48;
+const AV = {step: 0, busy: false, E: null, key: null, ids: [], n: 0, D: null, gh: 0, oShown: 0, joined: false, cellPhase: null,
+  ff: false, queued: null, anims: new Set(), waits: new Set(), ghosts: new Set(), expr: [], cellDelay: false};
+
+const A_STEPS = [
+  {h: "The input: one normalised vector per token", next: "Make queries, keys and values",
+    text: "Each column is one token’s vector after RMSNorm (chapter 3), 16 numbers here. Each cell’s brightness shows its value: bright for large positive, dark for large negative. The running vectors, from before normalisation, wait at the bottom."},
+  {h: "Make the queries, keys and values", next: "Split into heads",
+    text: "Each vector enters W_Q from the left and comes out of the bottom as its query, then swivels into place. The same happens with W_K, giving keys, and W_V, giving values. These matrices are square, 16 × 16 here and 4,096 × 4,096 in Llama 3 8B, so queries, keys and values are as long as the input. (Models with grouped-query attention use narrower W_K and W_V.)"},
+  {h: "Split into heads", next: "Rotate by position",
+    text: "Each query, key and value is cut into equal chunks, one per head: here 4 heads of 4 numbers each. (Llama 3 8B: 32 heads of 128.) Each head runs its own attention on its own chunks, side by side."},
+  {h: "Rotate the queries and keys by position", next: "Score every pair",
+    text: "Each chunk is made of pairs of numbers, and every pair has its own rotation speed. Here the top pair of each chunk spins fast and the bottom pair slowly, the same in every head. (Really, each pair is turned once, by its token’s position times its speed: 57° per position for the fast pair, 0.57° for the slow one. The spinning shows the difference in speed.) Values are not rotated."},
+  {h: "Score every query against every key", next: "Mask the future",
+    text: "Follow head 1. First its query chunks move down the side and its key chunks across the top. Then each query meets each key: where they bump, their inner product divided by √4 fills the cell. Bright means a good match."},
+  {h: "Mask the future, then softmax each row", next: "Mix the values",
+    text: "A token may only look at itself and earlier tokens, so every score above the diagonal is thrown away. Then each row’s remaining scores become weights that are all positive and add up to 1. Brighter means more attention."},
+  {h: "Mix the values", next: "The other heads, then join",
+    text: "Each token’s head-1 output is written out as a sum: its weight for each token it can see, times that token’s value, all added up. The weights come from the highlighted row; the values from the values group above. The result on the right then drops into the head outputs."},
+  {h: "Every head does the same, then they’re joined", next: "Multiply by W_O",
+    text: "Heads 2 to 4 each take their turn in the grid, very fast: their queries and keys move in, bump, get masked and softmaxed, and their weights scale and sum their own values. Then each token’s four head outputs slide together into one 16-number vector."},
+  {h: "Multiply by W_O", next: "Add to the running vectors",
+    text: "One more learned matrix, W_O, also 16 × 16, mixes the heads’ outputs together. Until now each head’s numbers stayed in their own chunk; W_O is where they combine."},
+  {h: "Add it back to the running vectors", next: "Start over",
+    text: "Each result is added onto its token’s running vector. That’s one attention block: every token has picked up information from earlier tokens. Next comes the feed-forward block."}
+];
+
+const aRand = k => { const x = Math.sin(k * 91.17 + 3.3) * 43758.5453; return x - Math.floor(x); };
+const aMat = (k, rows, cols) => Array.from({length: rows}, (_, r) => Array.from({length: cols}, (_, c) => (aRand(k * 1000 + r * 17 + c * 3) * 2 - 1) * 0.45));
+const aMul = (M, v) => M.map(row => row.reduce((t, w, c) => t + w * v[c], 0));
+const aHead = (v, h) => v.slice(AHS * h, AHS * h + AHS);
+const aLight = v => `hsl(345 62% ${(55 + 35 * Math.tanh(v / 1.2)).toFixed(1)}%)`;
+const aGrad = vals => `linear-gradient(${vals.map((v, i) => `${aLight(v)} ${(i / vals.length * 100).toFixed(2)}% ${((i + 1) / vals.length * 100).toFixed(2)}%`).join(",")})`;
+
+function aWait(ms) {
+  if (AV.ff || reduceMotion || !ms) return Promise.resolve();
+  return new Promise(r => { const o = {r}; o.t = setTimeout(() => { AV.waits.delete(o); r(); }, ms); AV.waits.add(o); });
+}
+function aAnim(el, frames, opts, final) {
+  if (AV.ff || reduceMotion) { if (final) el.style.transform = final; return Promise.resolve(); }
+  const a = el.animate(frames, opts);
+  AV.anims.add(a);
+  return a.finished.catch(() => {}).then(() => { AV.anims.delete(a); if (final) el.style.transform = final; a.cancel(); });
+}
+function aGhost(src) {
+  const c = src.cloneNode(true);
+  c.style.transition = "none";
+  c.style.zIndex = 4;
+  AV.E.inner.appendChild(c);
+  AV.ghosts.add(c);
+  return c;
+}
+const aDrop = g => { g.remove(); AV.ghosts.delete(g); };
+function avFastForward() {
+  AV.ff = true;
+  AV.E.inner.classList.add("live");
+  AV.waits.forEach(o => { clearTimeout(o.t); o.r(); });
+  AV.waits.clear();
+  AV.anims.forEach(a => a.finish());
+}
+
+function sphereIcon(cx, cy, r, id) {
+  return `<defs><radialGradient id="${id}" cx="35%" cy="32%" r="75%"><stop offset="0" style="stop-color:color-mix(in srgb,var(--accent) 15%,white)"/><stop offset=".55" style="stop-color:var(--accent)"/><stop offset="1" style="stop-color:color-mix(in srgb,var(--accent) 45%,black)"/></radialGradient></defs>
+    <circle cx="${cx}" cy="${cy}" r="${r + 5}" style="fill:var(--surface)"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#${id})"/>
+    <ellipse cx="${cx}" cy="${cy}" rx="${r}" ry="${(r * .32).toFixed(1)}" fill="none" style="stroke:white" stroke-width="1" opacity=".5"/>`;
+}
+
+function avData() {
+  const W = {WQ: aMat(1, AQ, AD), WK: aMat(2, AQ, AD), WV: aMat(3, AQ, AD), WO: aMat(4, AD, AQ)};
+  const h = AV.ids.map((id, i) => Array.from({length: AD}, (_, r) => embVal(id, r) * A_FACTORS[i]));
+  const x = h.map(v => { const rms = Math.sqrt(v.reduce((t, a) => t + a * a, 0) / AD); return v.map(a => a / rms); });
+  const q = x.map(v => aMul(W.WQ, v)), k = x.map(v => aMul(W.WK, v)), v = x.map(u => aMul(W.WV, u));
+  const heads = [...Array(AHEADS).keys()];
+  const rope = (u, pos) => heads.flatMap(hd => { const c = aHead(u, hd); return [...rot2(c.slice(0, 2), pos * A_THETA[0]), ...rot2(c.slice(2, 4), pos * A_THETA[1])]; });
+  const qr = q.map((u, i) => rope(u, i)), kr = k.map((u, i) => rope(u, i));
+  const dot = (a, b) => a.reduce((t, x, c) => t + x * b[c], 0);
+  const scores = heads.map(hd => qr.map(qi => kr.map(kj => dot(aHead(qi, hd), aHead(kj, hd)) / Math.sqrt(AHS))));
+  const weights = scores.map(Sc => Sc.map((row, i) => {
+    const m = Math.max(...row.slice(0, i + 1)), e = row.map((s, j) => j <= i ? Math.exp(s - m) : 0), t = e.reduce((a, b) => a + b, 0);
+    return e.map(a => a / t);
+  }));
+  const o = heads.map(hd => x.map((_, i) => [...Array(AHS).keys()].map(c => weights[hd][i].reduce((t, w, j) => t + w * aHead(v[j], hd)[c], 0))));
+  const cat = x.map((_, i) => heads.flatMap(hd => o[hd][i]));
+  const att = cat.map(u => aMul(W.WO, u));
+  const hNew = h.map((u, i) => u.map((a, r) => a + att[i][r]));
+  return {W, h, x, q, k, v, qr, kr, scores, weights, o, cat, att, hNew};
+}
+
+function avEl(cls, html = "", style = "") {
+  const d = document.createElement("div");
+  d.className = "av " + cls;
+  d.style.cssText = style;
+  d.innerHTML = html;
+  AV.E.inner.appendChild(d);
+  return d;
+}
+const aT = (x, y, sc = 1) => tr(x, y, sc === 1 ? "" : ` scale(${sc})`);
+const avPut = (el, [x, y, o, sc = 1], d = 0) => { el.style.transform = aT(x, y, sc); el.style.opacity = o; el.style.transitionDelay = d + "ms"; };
+const aGroupX = kind => A_MAT[A_KIND_MAT[kind]][0] + 3;
+const aChunkAt = (cx, cy) => [cx - ACW / 2, cy - ACH / 2];
+
+function avPos(kind, i, r, step) {
+  switch (kind) {
+    case "X": return [30 + i * 26, 50, 1];
+    case "H": return [30 + i * 26, A_BOT_Y, 1];
+    case "Q": case "K": case "V":
+      if (step >= 4 && r === AV.gh && kind === "Q") return [...aChunkAt(A_GRID_X - 20, A_GRID_Y + i * A_GS + 13), 1, A_GSC];
+      if (step >= 4 && r === AV.gh && kind === "K") return [...aChunkAt(A_GRID_X + i * A_GS + 13, 502), 1, A_GSC];
+      return [aGroupX(kind) + i * 22, A_GROUP_Y + r * (step >= 2 ? ACH + 6 : ACH), step >= 1 ? 1 : 0];
+    case "O": return [A_OUT_X + i * 22, A_OUT_Y + r * (AV.joined ? ACH : ACH + 6), step >= 8 ? 0 : r < AV.oShown ? 1 : 0];
+    case "A": return [A_RES_X + i * 22, step >= 9 ? A_BOT_Y : A_GROUP_Y, step >= 8 ? 1 : 0];
+  }
+}
+
+function avSetStatic() {
+  const st = AV.step;
+  AV.gh = st >= 7 ? AHEADS - 1 : 0;
+  AV.oShown = st >= 7 ? AHEADS : st === 6 ? 1 : 0;
+  AV.joined = st >= 7;
+  AV.cellPhase = null;
+}
+
+function aShadeChunk(el, vals) { [...el.children].forEach((c, p) => c.style.backgroundImage = aGrad(vals.slice(2 * p, 2 * p + 2))); }
+
+function avShadeAll(step) {
+  const {D, E} = AV;
+  for (let i = 0; i < AV.n; i++) {
+    E.X[i].style.backgroundImage = aGrad(D.x[i]);
+    E.A[i].style.backgroundImage = aGrad(D.att[i]);
+    E.H[i].style.backgroundImage = aGrad(step === 9 && !AV.busy ? D.hNew[i] : D.h[i]);
+    for (let r = 0; r < AHEADS; r++) {
+      aShadeChunk(E.Q[i][r], aHead(step >= 3 ? D.qr[i] : D.q[i], r));
+      aShadeChunk(E.K[i][r], aHead(step >= 3 ? D.kr[i] : D.k[i], r));
+      aShadeChunk(E.V[i][r], aHead(D.v[i], r));
+      aShadeChunk(E.O[i][r], D.o[r][i]);
+    }
+  }
+}
+
+function avLayout(hide = []) {
+  const {step, E, n} = AV;
+  avShadeAll(step);
+  for (let i = 0; i < n; i++) {
+    for (const kind of ["X", "H", "A"]) {
+      const p = avPos(kind, i, 0, step);
+      if (hide.includes(kind)) p[2] = 0;
+      avPut(E[kind][i], p);
+    }
+    for (let r = 0; r < AHEADS; r++) for (const kind of ["Q", "K", "V", "O"]) {
+      const p = avPos(kind, i, r, step);
+      if (hide.includes(kind)) p[2] = 0;
+      E[kind][i][r].classList.toggle("fused", kind === "O" ? AV.joined : step < 2);
+      avPut(E[kind][i][r], p, step === 2 ? r * 70 : step === 4 && r === AV.gh && (kind === "Q" || kind === "K") ? i * 70 : 0);
+    }
+  }
+  for (const [k, el] of Object.entries(E.mats)) avPut(el, [A_MAT[k][0], A_MAT[k][1], 1]);
+  const Wt = AV.D.weights[AV.gh], Sc = AV.D.scores[AV.gh];
+  const phase = AV.cellPhase ?? (step < 4 ? "hidden" : step === 4 ? "scores" : "weights");
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    const c = E.cells[i][j], masked = (phase === "masked" || phase === "weights") && j > i;
+    c.classList.toggle("masked", masked);
+    c.style.backgroundColor = masked ? "transparent" : phase === "weights" ? `hsl(345 62% ${(22 + 68 * Wt[i][j]).toFixed(1)}%)` : aLight(Sc[i][j]);
+    const d = !AV.cellDelay ? 0 : phase === "masked" ? 100 + Math.max(0, j - i) * 60 : phase === "weights" ? 100 + i * 110 : 0;
+    avPut(c, [A_GRID_X + j * A_GS, A_GRID_Y + i * A_GS, phase !== "hidden" ? 1 : 0], d);
+    c.style.transition = `transform .8s cubic-bezier(.4,0,.2,1) ${d}ms, opacity .5s ${d}ms, background-color .5s ${d}ms`;
+  }
+  const L = E.lbl, show = (el, x, y, on) => avPut(el, [x, y, on ? 1 : 0]);
+  L.grid.textContent = `head ${AV.gh + 1}: each query against each key`;
+  L.o.textContent = AV.joined ? "head outputs, joined (16)" : "head outputs";
+  show(L.x, 30, 28, true);
+  L.tokIn.forEach((el, i) => show(el, 23 + i * 26, 214, true));
+  show(L.q, aGroupX("Q"), 238, step >= 1);
+  show(L.k, aGroupX("K"), 238, step >= 1);
+  show(L.v, aGroupX("V"), 238, step >= 1);
+  L.heads.forEach((el, r) => show(el, 196, A_GROUP_Y + r * (ACH + 6) + 12, step >= 2));
+  show(L.grid, A_GRID_X - 95, 456, step >= 4);
+  L.rows.forEach((el, i) => show(el, A_GRID_X - 95, A_GRID_Y + i * A_GS + 7, step >= 4));
+  L.cols.forEach((el, j) => show(el, A_GRID_X + j * A_GS - 1, 472, step >= 4));
+  show(L.o, A_OUT_X, 748, step === 6 || step === 7);
+  show(L.att, A_RES_X, step >= 9 ? 778 : 238, step >= 8);
+  show(L.run, 30, 778, true);
+  L.tokRun.forEach((el, i) => show(el, 23 + i * 26, 964, true));
+  avPut(E.up, [0, 0, 1]);
+  avPut(E.arrow, [0, 0, step >= 9 ? 1 : 0]);
+}
+
+function avBuild() {
+  if (EMB.key !== S.text) { EMB.key = S.text; EMB.tk = trainAll(S.text); embBuild(); }
+  AV.ids = EMB.ids.slice(0, 7);
+  AV.n = AV.ids.length;
+  AV.D = avData();
+  const inner = $("#av-inner");
+  inner.innerHTML = "";
+  inner.style.height = AHGT + "px";
+  AV.E = {inner, cells: [], mats: {}, lbl: {}};
+  const E = AV.E, n = AV.n, tokLabel = id => esc(bytesLabel(EMB.tk.vocab[id]));
+  for (const [k, label, cls] of [["WQ", "W_Q", "mq"], ["WK", "W_K", "mk"], ["WV", "W_V", "mv"], ["WO", "W_O", "mo"]]) {
+    const [, , rows, cols] = A_MAT[k];
+    E.mats[k] = avEl(`amat ${cls}`, `<b>${label}</b>`, `width:${cols * ACELL}px;height:${rows * ACELL}px`);
+  }
+  const head = id => `<defs><marker id="${id}" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" style="fill:var(--ink)"/></marker></defs>`;
+  E.up = avEl("aarrow", `<svg width="${AW}" height="${AHGT}" aria-hidden="true">${head("av-up")}<path d="M121 772 L121 238" fill="none" style="stroke:var(--ink)" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#av-up)"/>${sphereIcon(121, 505, 18, "av-sph")}</svg>`);
+  E.arrow = avEl("aarrow", `<svg width="${AW}" height="${AHGT}" aria-hidden="true">${head("av-left")}<path d="M815 880 L222 880" fill="none" style="stroke:var(--ink)" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#av-left)"/>
+    <circle cx="517" cy="880" r="16" style="fill:var(--surface);stroke:var(--ink)" stroke-width="2"/><text x="517" y="881" text-anchor="middle" dominant-baseline="middle" font-size="22" font-weight="700" style="fill:var(--ink)">+</text></svg>`);
+  for (const [kind, cls] of [["X", "bx"], ["H", "bh"], ["A", "bo"]]) E[kind] = AV.ids.map(() => avEl(`avec ${cls}`));
+  for (const [kind, cls] of [["Q", "bq"], ["K", "bk"], ["V", "bv"], ["O", "bv"]])
+    E[kind] = AV.ids.map(() => Array.from({length: AHEADS}, (_, r) => avEl(`ach ${cls}${r === 0 ? " hf" : ""}${r === AHEADS - 1 ? " hl" : ""}`, "<i></i><i></i>")));
+  E.cells = Array.from({length: n}, () => Array.from({length: n}, () => avEl("agc")));
+  const lbl = t => avEl("albl", t);
+  E.lbl = {
+    x: lbl("normalised x (16)"), q: lbl("queries q (16)"), k: lbl("keys k (16)"), v: lbl("values v (16)"),
+    heads: [1, 2, 3, 4].map(h => lbl(`head ${h}`)),
+    tokIn: AV.ids.map(id => avEl("albl atl", tokLabel(id))),
+    tokRun: AV.ids.map(id => avEl("albl atl", tokLabel(id))),
+    rows: AV.ids.map(id => avEl("albl atl", tokLabel(id), "width:70px;text-align:left")),
+    cols: AV.ids.map(id => avEl("albl atl", tokLabel(id))),
+    grid: lbl(""), o: lbl(""), run: lbl("running vectors (16)"), att: lbl("attention result (16)")
+  };
+  inner.classList.add("live");
+  avSetStatic();
+  avText();
+  avLayout();
+  void inner.offsetHeight;
+  inner.classList.remove("live");
+  avScale();
+}
+
+function avText() {
+  const s = A_STEPS[AV.step];
+  $("#av-stepno").textContent = `Step ${AV.step + 1} of ${A_STEPS.length}`;
+  $("#av-h").textContent = s.h;
+  $("#av-text").textContent = s.text;
+  $("#av-next").textContent = s.next;
+  $("#av-back").disabled = AV.step === 0;
+}
+
+function avScale() {
+  const stage = $("#av-stage"), s = Math.min(1, stage.clientWidth / AW);
+  AV.E.inner.style.transform = `scale(${s})`;
+  stage.style.height = AHGT * s + "px";
+}
+
+const aCentered = (cx, cy, w, h, deg, sc = 1) => `translate(${(cx - w / 2).toFixed(1)}px,${(cy - h / 2).toFixed(1)}px) rotate(${deg.toFixed(1)}deg) scale(${sc})`;
+
+function aSwivel(w, h, along, mx, my, mh, tx, ty) {
+  const rowY = my + mh + 6 + w / 2, frames = [];
+  frames.push({transform: aCentered(mx + along, my + mh - w / 2, w, h, -90, .2), offset: 0});
+  frames.push({transform: aCentered(mx + along, rowY, w, h, -90), offset: .22});
+  frames.push({transform: aCentered(mx + along, rowY, w, h, -90), offset: .34});
+  [30, 60, 90].forEach((phi, k) => {
+    const a = phi * Math.PI / 180;
+    frames.push({transform: aCentered(mx + along * Math.cos(a), rowY + along * Math.sin(a), w, h, -90 + phi), offset: .34 + (k + 1) * .1});
+  });
+  frames.push({transform: aCentered(tx + w / 2, ty + h / 2, w, h, 0), offset: 1});
+  return frames;
+}
+
+async function avProjectOne(kind, i, s) {
+  const mk = A_KIND_MAT[kind], [mx, my, rows] = A_MAT[mk], mh = rows * ACELL, mat = AV.E.mats[mk];
+  const moving = kind === "A";
+  const srcs = moving ? AV.E.O[i] : [aGhost(AV.E.X[i])];
+  srcs.forEach(c => { c.style.transition = "none"; c.style.opacity = 1; c.style.zIndex = 4; });
+  await Promise.all(srcs.map((c, r) => {
+    const [sx, sy] = moving ? avPos("O", i, r, 7) : avPos("X", i, 0, AV.step), ey = my + r * ACH;
+    return aAnim(c, [{transform: tr(sx, sy)}, {transform: tr(mx - 22, ey)}], {duration: 560 * s, easing: "cubic-bezier(.4,0,.2,1)"}, tr(mx - 22, ey));
+  }));
+  await Promise.all(srcs.map((c, r) => aAnim(c, [{transform: tr(mx - 22, my + r * ACH)}, {transform: tr(mx - 8, my + r * ACH, " scaleX(0)")}], {duration: 220 * s}, null)));
+  if (moving) srcs.forEach((c, r) => { c.style.opacity = 0; c.style.zIndex = ""; c.style.transform = tr(...avPos("O", i, r, 7).slice(0, 2)); c.style.transition = ""; });
+  else srcs.forEach(aDrop);
+  aAnim(mat, [{boxShadow: "0 0 0 0 transparent"}, {boxShadow: "0 0 0 5px var(--ink)"}, {boxShadow: "0 0 0 0 transparent"}], {duration: 380 * s}, null);
+  const outs = moving ? [AV.E.A[i]] : AV.E[kind][i];
+  await Promise.all(outs.map((el, r) => {
+    const [tx, ty] = moving ? avPos("A", i, 0, 8) : avPos(kind, i, r, AV.step);
+    const h = moving ? AXH : ACH, along = moving ? h / 2 : r * ACH + ACH / 2;
+    el.style.transition = "none";
+    el.style.opacity = 1;
+    return aAnim(el, aSwivel(ACW, h, along, mx, my, mh, tx, ty), {duration: 1250 * s, easing: "ease-in-out"}, tr(tx, ty)).then(() => { el.style.transition = ""; });
+  }));
+}
+
+async function avTwoThenRest(f) {
+  await f(0, 1);
+  if (AV.n > 1) await f(1, .75);
+  await Promise.all([...Array(AV.n).keys()].slice(2).map((i, k) => aWait(k * 90).then(() => f(i, .4))));
+}
+
+async function avProjectAll() {
+  await avTwoThenRest((i, s) => avProjectOne("Q", i, s));
+  for (const kind of ["K", "V"]) {
+    await aWait(250);
+    await Promise.all([...Array(AV.n).keys()].map(i => aWait(i * 90).then(() => avProjectOne(kind, i, .4))));
+  }
+}
+
+async function avSpin() {
+  const jobs = [];
+  for (const kind of ["Q", "K"]) for (let i = 0; i < AV.n; i++) for (let r = 0; r < AHEADS; r++)
+    [...AV.E[kind][i][r].children].forEach((pair, p) => {
+      const deg = p === 0 ? 1080 : 360;
+      pair.style.transition = "none";
+      jobs.push(aAnim(pair, [{transform: "rotate(0deg)"}, {transform: `rotate(${deg}deg)`}], {duration: 2400, easing: "linear"}, "rotate(0deg)"));
+    });
+  await Promise.all(jobs);
+  await aWait(300);
+  avShadeAll(3);
+  for (const kind of ["Q", "K"]) AV.E[kind].flat().forEach(ch => [...ch.children].forEach(pair => { pair.style.transition = ""; pair.style.transform = ""; }));
+  await aWait(400);
+}
+
+function avBumpCell(i, j, s) {
+  const g = AV.gh, cx = A_GRID_X + j * A_GS, cy = A_GRID_Y + i * A_GS;
+  const qg = aGhost(AV.E.Q[i][g]), kg = aGhost(AV.E.K[j][g]);
+  const [qx, qy] = avPos("Q", i, g, 4), [kx, ky] = avPos("K", j, g, 4);
+  const mq = aChunkAt(cx - 2, cy + 13), mk = aChunkAt(cx + 28, cy + 13), mid = aChunkAt(cx + 13, cy + 13);
+  return Promise.all([
+    aAnim(qg, [{transform: aT(qx, qy, A_GSC)}, {transform: aT(...mq, A_GSC), offset: .7}, {transform: aT(...mid, .4), opacity: 0}], {duration: 700 * s, easing: "ease-in"}, null),
+    aAnim(kg, [{transform: aT(kx, ky, A_GSC)}, {transform: aT(...mk, A_GSC), offset: .7}, {transform: aT(...mid, .4), opacity: 0}], {duration: 700 * s, easing: "ease-in"}, null)
+  ]).then(() => {
+    aDrop(qg);
+    aDrop(kg);
+    const c = AV.E.cells[i][j];
+    c.style.transition = "none";
+    c.style.opacity = 1;
+    return aAnim(c, [{transform: tr(cx, cy, " scale(1.3)")}, {transform: tr(cx, cy)}], {duration: 260 * s}, tr(cx, cy));
+  });
+}
+
+async function avScore() {
+  await aWait(1000 + AV.n * 70);
+  const pairs = [];
+  for (let i = 0; i < AV.n; i++) for (let j = 0; j < AV.n; j++) pairs.push([i, j]);
+  await avBumpCell(...pairs[0], 1);
+  if (pairs[1]) await avBumpCell(...pairs[1], .75);
+  await Promise.all(pairs.slice(2).map(([i, j], k) => aWait(k * 16).then(() => avBumpCell(i, j, .22))));
+}
+
+async function avMaskSoftmax() {
+  AV.cellDelay = true;
+  AV.cellPhase = "masked";
+  avLayout();
+  await aWait(600 + AV.n * 60);
+  AV.cellPhase = "weights";
+  avLayout();
+  await aWait(400 + AV.n * 110);
+  AV.cellDelay = false;
+}
+
+function avClearExpr() { AV.expr.forEach(e => e.remove()); AV.expr = []; }
+
+function aGlyphAt(txt, cx, cy) {
+  const g = avEl("mx-glyph aexpr", txt);
+  g.style.transition = "opacity .25s";
+  g.style.transform = tr(cx - 10, cy - 12);
+  g.style.opacity = 0;
+  AV.expr.push(g);
+  requestAnimationFrame(() => { g.style.opacity = 1; });
+  return g;
+}
+
+async function avMixExpr(i, s, hd = 0) {
+  const Wt = AV.D.weights[hd], cells = AV.E.cells[i], cy0 = A_GRID_Y + i * A_GS, cy = cy0 + 13, tx = j => A_WB_X + j * A_TERM;
+  cells.forEach(c => c.classList.add("rowhl"));
+  const keep = g => { AV.ghosts.delete(g); AV.expr.push(g); return g; };
+  await Promise.all([...Array(i + 1).keys()].map(async j => {
+    await aWait(j * 140 * s);
+    const w = keep(aGhost(cells[j])), v = keep(aGhost(AV.E.V[j][hd]));
+    w.classList.remove("rowhl");
+    const [vx, vy] = avPos("V", j, hd, 6), wT = tr(tx(j), cy - 6.5, " scale(.5)"), vT = aT(...aChunkAt(tx(j) + 31, cy), A_GSC);
+    await Promise.all([
+      aAnim(w, [{transform: tr(A_GRID_X + j * A_GS, cy0)}, {transform: wT}], {duration: 750 * s, easing: "cubic-bezier(.4,0,.2,1)"}, wT),
+      aAnim(v, [{transform: aT(vx, vy)}, {transform: vT}], {duration: 850 * s, easing: "cubic-bezier(.4,0,.2,1)"}, vT)
+    ]);
+    aGlyphAt("×", tx(j) + 19, cy);
+    if (j < i) aGlyphAt("+", tx(j) + 43, cy);
+  }));
+  aGlyphAt("=", tx(i) + 43, cy);
+  await aWait(250 * s);
+  const outT = aT(...aChunkAt(tx(i) + 58, cy), A_GSC), res = keep(aGhost(AV.E.O[i][hd]));
+  res.style.opacity = 1;
+  await aAnim(res, [{transform: aT(...aChunkAt(tx(i) + 58, cy), A_GSC * 1.5), opacity: 0}, {transform: outT, opacity: 1}], {duration: 320 * s}, outT);
+  await aWait(200 * s);
+  const o = AV.E.O[i][hd], [ox, oy] = avPos("O", i, hd, 6);
+  o.style.transition = "none";
+  o.style.opacity = 1;
+  await aAnim(o, [{transform: outT}, {transform: aT(ox, oy)}], {duration: 700 * s, easing: "cubic-bezier(.4,0,.2,1)"}, aT(ox, oy));
+  o.style.transition = "";
+  cells.forEach(c => c.classList.remove("rowhl"));
+}
+
+async function avOtherHeads() {
+  const inner = AV.E.inner, pairs = [], rows = [...Array(AV.n).keys()];
+  for (const i of rows) for (const j of rows) pairs.push([i, j]);
+  inner.classList.add("quick");
+  for (let hd = 1; hd < AHEADS; hd++) {
+    AV.gh = hd;
+    AV.cellPhase = "hidden";
+    avLayout();
+    await aWait(330);
+    await Promise.all(pairs.map(([i, j], k) => aWait(k * 4).then(() => avBumpCell(i, j, .12))));
+    AV.cellPhase = "masked";
+    avLayout();
+    await aWait(230);
+    AV.cellPhase = "weights";
+    avLayout();
+    await aWait(280);
+    avClearExpr();
+    await Promise.all(rows.map(i => aWait(i * 25).then(() => avMixExpr(i, .14, hd))));
+    AV.oShown = hd + 1;
+  }
+  await aWait(200);
+  inner.classList.remove("quick");
+  AV.joined = true;
+  avLayout();
+  await aWait(850);
+  await Promise.all(AV.E.O.flat().map(el => aAnim(el, [{boxShadow: "0 0 0 0 transparent"}, {boxShadow: "0 0 0 3px var(--ink)"}, {boxShadow: "0 0 0 0 transparent"}], {duration: 450}, null)));
+}
+
+async function avAdd() {
+  await Promise.all(AV.E.A.map((el, i) => {
+    const from = tr(A_RES_X + i * 22, A_GROUP_Y), to = tr(A_RES_X + i * 22, A_BOT_Y);
+    el.style.transition = "none";
+    return aAnim(el, [{transform: from}, {transform: to}], {duration: 900, delay: i * 60, easing: "cubic-bezier(.4,0,.2,1)"}, to);
+  }));
+  AV.E.A.forEach(el => { el.style.transition = ""; });
+  AV.E.arrow.style.opacity = 1;
+  await aWait(500);
+  await Promise.all(AV.E.A.map((el, i) => {
+    const [x0, y0] = avPos("A", i, 0, 9), [x1, y1] = avPos("H", i, 0, 9), c = aGhost(el);
+    return aAnim(c, [{transform: tr(x0, y0), opacity: 1}, {transform: tr(517 - 8, A_BOT_Y), opacity: 1, offset: .5}, {transform: tr(x1, y1), opacity: 1, offset: .85}, {transform: tr(x1, y1), opacity: 0}],
+      {duration: 1500, delay: i * 120, easing: "cubic-bezier(.4,0,.2,1)"}, null).then(() => aDrop(c));
+  }));
+}
+
+async function avGo(step) {
+  const target = (step + A_STEPS.length) % A_STEPS.length;
+  if (AV.busy) { AV.queued = target; avFastForward(); return; }
+  const prev = AV.step;
+  AV.step = target;
+  const t = target, forward = t === prev + 1;
+  const plan = forward && {
+    1: avProjectAll, 3: avSpin, 4: avScore, 5: avMaskSoftmax,
+    6: () => avTwoThenRest((i, s) => avMixExpr(i, s, 0)),
+    7: avOtherHeads,
+    8: () => avTwoThenRest((i, s) => avProjectOne("A", i, s)),
+    9: avAdd
+  }[t];
+  if (t < 6 || t < prev) avClearExpr();
+  avSetStatic();
+  avText();
+  if (!plan) { avLayout(); return; }
+  AV.busy = true;
+  if (t === 1) avLayout(["Q", "K", "V"]);
+  else if (t === 4) { AV.cellPhase = "hidden"; avLayout(); }
+  else if (t === 5) { AV.cellPhase = "scores"; avLayout(); }
+  else if (t === 6) { AV.oShown = 0; avLayout(); }
+  else if (t === 7) { AV.gh = 0; AV.oShown = 1; AV.joined = false; avLayout(); }
+  else if (t === 8 || t === 9) { AV.step = t - 1; avSetStatic(); avLayout(); AV.step = t; }
+  else if (t !== 3) avLayout();
+  try { await aWait(150); await plan(); } catch (e) { console.error(e); }
+  const skipped = AV.ff;
+  AV.busy = false;
+  AV.ff = false;
+  AV.ghosts.forEach(g => g.remove());
+  AV.ghosts.clear();
+  AV.E.inner.classList.remove("quick");
+  AV.E.cells.flat().forEach(c => c.classList.remove("rowhl"));
+  AV.cellDelay = false;
+  avSetStatic();
+  if (skipped) {
+    AV.E.inner.classList.add("live");
+    avLayout();
+    void AV.E.inner.offsetHeight;
+    AV.E.inner.classList.remove("live");
+  } else avLayout();
+  if (AV.queued !== null) { const q = AV.queued; AV.queued = null; avGo(q); }
+}
+
+function avShow() {
+  const key = S.text + "|" + EMB.sentence;
+  if (AV.key !== key || !AV.E) { AV.key = key; AV.step = 0; avBuild(); }
+  else avScale();
+}
+
+class FlowStage {
+  constructor(sel, w, h) { Object.assign(this, {sel, w, h, ff: false, busy: false, queued: null, step: 0, anims: new Set(), waits: new Set(), ghosts: new Set(), inner: null}); }
+  reset() { this.inner = $(this.sel); this.inner.innerHTML = ""; this.inner.style.height = this.h + "px"; }
+  wait(ms) {
+    if (this.ff || reduceMotion || !ms) return Promise.resolve();
+    return new Promise(r => { const o = {r}; o.t = setTimeout(() => { this.waits.delete(o); r(); }, ms); this.waits.add(o); });
+  }
+  anim(el, frames, opts, final) {
+    if (this.ff || reduceMotion) { if (final) el.style.transform = final; return Promise.resolve(); }
+    const a = el.animate(frames, opts);
+    this.anims.add(a);
+    return a.finished.catch(() => {}).then(() => { this.anims.delete(a); if (final) el.style.transform = final; a.cancel(); });
+  }
+  el(cls, html = "", style = "") {
+    const d = document.createElement("div");
+    d.className = "av " + cls;
+    d.style.cssText = style;
+    d.innerHTML = html;
+    this.inner.appendChild(d);
+    return d;
+  }
+  put(el, [x, y, o, sc = 1], d = 0) { el.style.transform = aT(x, y, sc); el.style.opacity = o; el.style.transitionDelay = d + "ms"; }
+  ghost(src) { const c = src.cloneNode(true); c.style.transition = "none"; c.style.zIndex = 4; c.style.opacity = 1; this.inner.appendChild(c); this.ghosts.add(c); return c; }
+  drop(g) { g.remove(); this.ghosts.delete(g); }
+  fastForward() {
+    this.ff = true;
+    this.inner.classList.add("live");
+    this.waits.forEach(o => { clearTimeout(o.t); o.r(); });
+    this.waits.clear();
+    this.anims.forEach(a => a.finish());
+  }
+  async run(plan, after) {
+    this.busy = true;
+    try { await plan(); } catch (e) { console.error(e); }
+    const skipped = this.ff;
+    this.busy = false;
+    this.ff = false;
+    this.ghosts.forEach(g => g.remove());
+    this.ghosts.clear();
+    if (skipped) { this.inner.classList.add("live"); after(); void this.inner.offsetHeight; this.inner.classList.remove("live"); }
+    else after();
+  }
+  async twoThenRest(n, f) {
+    await f(0, 1);
+    if (n > 1) await f(1, .75);
+    await Promise.all([...Array(n).keys()].slice(2).map((i, k) => this.wait(k * 90).then(() => f(i, .4))));
+  }
+  scale(stageSel) {
+    const stage = $(stageSel), s = Math.min(1, stage.clientWidth / this.w);
+    this.inner.style.transform = `scale(${s})`;
+    stage.style.height = this.h * s + "px";
+  }
+}
+
+const FCELL = 8, FD = 16, FHID = 32, FXH = FD * FCELL, FHH = FHID * FCELL, FCOL = 22, FW = 1000, FH = 960;
+const F_MAT = {WG: [230, 50, FD, FHID], WU: [530, 50, FD, FHID], WD: [830, 500, FHID, FD]};
+const F_RUN_Y = 800, F_H_X = 560, F_H_Y = 520, F_R_X = 818;
+const FS = new FlowStage("#ff-inner", FW, FH);
+const FF = {E: null, D: null, n: 0, ids: [], key: null};
+const silu = z => z / (1 + Math.exp(-z));
+const fGrad = vals => aGrad(vals);
+
+const F_STEPS = [
+  {h: "The input: the running vectors after attention", next: "Up and gate",
+    text: "These are the running vectors as attention left them, at the bottom. As before, a normalised copy goes up to the top, 16 numbers per token, and the feed-forward block works on that copy. Every token goes through it separately: there is no mixing between tokens here."},
+  {h: "Two up-projections: gate and up", next: "Apply SiLU to the gate",
+    text: "Each vector goes through two learned matrices, W_gate and W_up, each 16 × 32 here, so it comes out twice as long, twice over. (Llama 3 8B: 4,096 → 14,336, about 3.5 times wider.) These two wide vectors are what the block thinks with."},
+  {h: "Activation: SiLU on the gate", next: "Multiply gate × up",
+    text: "The gate goes through a simple curve, SiLU: negative numbers are squashed to nearly zero, positive numbers pass almost unchanged. This bend is the only non-linear part of the block; without it, the three matrices would collapse into one."},
+  {h: "Multiply the gate and up vectors, number by number", next: "Down-projection",
+    text: "Each number of the activated gate multiplies the matching number of the up vector. Where the gate is near zero, that feature is switched off; where it’s large, the feature passes through. The result is the hidden vector, still 32 numbers."},
+  {h: "Down-projection: back to 16 numbers", next: "Add to the running vectors",
+    text: "One last matrix, W_down (32 × 16), shrinks each hidden vector back to the size of the running vectors."},
+  {h: "Add it back to the running vectors", next: "Start over",
+    text: "The result is added onto each token’s running vector, just like attention’s result was. That completes one layer: normalise → attention → add, normalise → feed-forward → add. The next layer starts again from these updated vectors."}
+];
+
+function ffEnsureData() {
+  if (EMB.key !== S.text) { EMB.key = S.text; EMB.tk = trainAll(S.text); embBuild(); }
+  const key = S.text + "|" + EMB.sentence;
+  if (AV.key !== key || !AV.D) { AV.key = key; AV.ids = EMB.ids.slice(0, 7); AV.n = AV.ids.length; AV.D = avData(); AV.E = null; }
+  return key;
+}
+
+function ffData() {
+  const W = {WG: aMat(11, FHID, FD), WU: aMat(12, FHID, FD), WD: aMat(13, FD, FHID)};
+  const hin = AV.D.hNew;
+  const x = hin.map(v => { const rms = Math.sqrt(v.reduce((t, a) => t + a * a, 0) / FD); return v.map(a => a / rms); });
+  const g = x.map(v => aMul(W.WG, v)), u = x.map(v => aMul(W.WU, v));
+  const ga = g.map(v => v.map(silu)), hid = ga.map((v, i) => v.map((a, j) => a * u[i][j]));
+  const r = hid.map(v => aMul(W.WD, v)), out = hin.map((v, i) => v.map((a, j) => a + r[i][j]));
+  return {W, hin, x, g, u, ga, hid, r, out};
+}
+
+function ffPos(kind, i, step) {
+  const gx = mk => F_MAT[mk][0] + 51 + i * FCOL;
+  switch (kind) {
+    case "X": return [30 + i * FCOL, 50, 1];
+    case "Run": return [30 + i * FCOL, F_RUN_Y, 1];
+    case "G": return [gx("WG"), 220, step >= 1 ? 1 : 0];
+    case "U": return [gx("WU"), 220, step >= 1 ? 1 : 0];
+    case "Hd": return [F_H_X + i * FCOL, F_H_Y, step >= 3 && step < 4 ? 1 : 0];
+    case "R": return [F_R_X + i * FCOL, F_RUN_Y, step >= 4 ? 1 : 0];
+  }
+}
+
+function ffLayout(hide = []) {
+  const step = FS.step, {E, D, n} = FF;
+  for (let i = 0; i < n; i++) {
+    E.X[i].style.backgroundImage = fGrad(D.x[i]);
+    E.G[i].style.backgroundImage = fGrad(step >= 2 ? D.ga[i] : D.g[i]);
+    E.U[i].style.backgroundImage = fGrad(D.u[i]);
+    E.Hd[i].style.backgroundImage = fGrad(D.hid[i]);
+    E.R[i].style.backgroundImage = fGrad(D.r[i]);
+    E.Run[i].style.backgroundImage = fGrad(step >= 5 && !FS.busy ? D.out[i] : D.hin[i]);
+    for (const kind of ["X", "Run", "G", "U", "Hd", "R"]) {
+      const p = ffPos(kind, i, step);
+      if (hide.includes(kind)) p[2] = 0;
+      FS.put(E[kind][i], p);
+    }
+  }
+  for (const [k, el] of Object.entries(E.mats)) FS.put(el, [F_MAT[k][0], F_MAT[k][1], 1]);
+  const L = E.lbl, show = (el, x, y, on) => FS.put(el, [x, y, on ? 1 : 0]);
+  show(L.x, 30, 28, true);
+  L.tokX.forEach((el, i) => show(el, 26 + i * FCOL, 182, true));
+  show(L.g, F_MAT.WG[0] + 51, 198, step >= 1);
+  show(L.u, F_MAT.WU[0] + 51, 198, step >= 1);
+  show(L.silu, 180, 300, step >= 2);
+  show(L.h, F_H_X, 498, step === 3);
+  show(L.r, F_R_X, 778, step >= 4);
+  show(L.run, 30, 778, true);
+  L.tokRun.forEach((el, i) => show(el, 26 + i * FCOL, 932, true));
+  FS.put(E.up, [0, 0, 1]);
+  FS.put(E.across, [0, 0, step >= 5 ? 1 : 0]);
+}
+
+function ffBuild() {
+  FF.key = ffEnsureData();
+  FF.ids = AV.ids;
+  FF.n = AV.n;
+  FF.D = ffData();
+  FS.reset();
+  FF.E = {mats: {}, lbl: {}};
+  const E = FF.E, tokLabel = id => esc(bytesLabel(EMB.tk.vocab[id]));
+  for (const [k, label, color] of [["WG", "W_gate", "#0E9AA7"], ["WU", "W_up", "#3B5BDB"], ["WD", "W_down", "#8A4FD1"]]) {
+    const [, , rows, cols] = F_MAT[k];
+    E.mats[k] = FS.el("amat fmat", `<b>${label}</b>`, `width:${cols * FCELL}px;height:${rows * FCELL}px;background-color:${color}`);
+  }
+  const arrowSvg = (id, d, plus) => `<svg width="${FW}" height="${FH}" aria-hidden="true"><defs><marker id="${id}" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" style="fill:var(--ink)"/></marker></defs>
+    <path d="${d}" fill="none" style="stroke:var(--ink)" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#${id})"/>${plus ? `<circle cx="${plus[0]}" cy="${plus[1]}" r="16" style="fill:var(--surface);stroke:var(--ink)" stroke-width="2"/><text x="${plus[0]}" y="${plus[1] + 1}" text-anchor="middle" dominant-baseline="middle" font-size="22" font-weight="700" style="fill:var(--ink)">+</text>` : ""}</svg>`;
+  E.up = FS.el("aarrow", arrowSvg("ff-up", "M99 772 L99 200").replace("</svg>", sphereIcon(99, 486, 18, "ff-sph") + "</svg>"));
+  E.across = FS.el("aarrow", arrowSvg("ff-left", `M${F_R_X - 6} 864 L190 864`, [499, 864]));
+  const col = (cls, h) => FF.ids.map(() => FS.el(`avec ${cls}`, "", `height:${h}px`));
+  E.X = col("bx", FXH); E.Run = col("bh", FXH);
+  E.G = col("bg", FHH); E.U = col("bu", FHH); E.Hd = col("bhid", FHH); E.R = col("bo", FXH);
+  const lbl = t => FS.el("albl", t);
+  E.lbl = {
+    x: lbl("normalised x (16)"), g: lbl("gate (32)"), u: lbl("up (32)"), h: lbl("hidden = SiLU(gate) × up (32)"),
+    r: lbl("feed-forward result (16)"), run: lbl("running vectors (16), after attention"),
+    tokX: FF.ids.map(id => FS.el("albl atl", tokLabel(id))), tokRun: FF.ids.map(id => FS.el("albl atl", tokLabel(id))),
+    silu: FS.el("albl", `<svg width="90" height="70" aria-hidden="true"><line x1="0" y1="45" x2="90" y2="45" style="stroke:var(--rule)"/><line x1="45" y1="0" x2="45" y2="70" style="stroke:var(--rule)"/>
+      <path d="${Array.from({length: 46}, (_, k) => { const z = -4 + k * 8 / 45; return `${k ? "L" : "M"}${(45 + z * 10).toFixed(1)} ${(45 - silu(z) * 10).toFixed(1)}`; }).join("")}" fill="none" style="stroke:#0E9AA7" stroke-width="2.5"/></svg><div style="font-weight:600;color:var(--ink)">SiLU</div>`)
+  };
+  FS.step = 0;
+  FS.inner.classList.add("live");
+  ffText();
+  ffLayout();
+  void FS.inner.offsetHeight;
+  FS.inner.classList.remove("live");
+  FS.scale("#ff-stage");
+}
+
+function ffText() {
+  const s = F_STEPS[FS.step];
+  $("#ff-stepno").textContent = `Step ${FS.step + 1} of ${F_STEPS.length}`;
+  $("#ff-h").textContent = s.h;
+  $("#ff-text").textContent = s.text;
+  $("#ff-next").textContent = s.next;
+  $("#ff-back").disabled = FS.step === 0;
+}
+
+async function ffProject(mk, kind, i, s, srcKind) {
+  const [mx, my, rows, cols] = F_MAT[mk], mh = rows * FCELL, mw = cols * FCELL;
+  const moving = srcKind === "Hd";
+  const src = moving ? FF.E.Hd[i] : FS.ghost(FF.E.X[i]);
+  const [sx, sy] = ffPos(srcKind, i, moving ? 3 : FS.step);
+  src.style.transition = "none";
+  src.style.opacity = 1;
+  src.style.zIndex = 4;
+  await FS.anim(src, [{transform: tr(sx, sy)}, {transform: tr(mx - 22, my)}], {duration: 560 * s, easing: "cubic-bezier(.4,0,.2,1)"}, tr(mx - 22, my));
+  await FS.anim(src, [{transform: tr(mx - 22, my)}, {transform: tr(mx - 8, my, " scaleX(0)")}], {duration: 220 * s}, null);
+  if (moving) { src.style.opacity = 0; src.style.zIndex = ""; src.style.transition = ""; } else FS.drop(src);
+  FS.anim(FF.E.mats[mk], [{boxShadow: "0 0 0 0 transparent"}, {boxShadow: "0 0 0 5px var(--ink)"}, {boxShadow: "0 0 0 0 transparent"}], {duration: 380 * s}, null);
+  const out = FF.E[kind][i], [tx, ty] = ffPos(kind, i, FS.step), h = kind === "R" ? FXH : FHH;
+  out.style.transition = "none";
+  out.style.opacity = 1;
+  await FS.anim(out, aSwivel(ACW, h, mw / 2, mx, my, mh, tx, ty), {duration: 1300 * s, easing: "ease-in-out"}, tr(tx, ty));
+  out.style.transition = "";
+}
+
+async function ffUpGate() {
+  await FS.twoThenRest(FF.n, async (i, s) => { await ffProject("WG", "G", i, s, "X"); });
+  await FS.wait(200);
+  await Promise.all([...Array(FF.n).keys()].map(i => FS.wait(i * 90).then(() => ffProject("WU", "U", i, .4, "X"))));
+}
+
+async function ffSilu() {
+  await Promise.all(FF.E.G.map((el, i) => {
+    const w = FS.ghost(el);
+    w.style.backgroundImage = fGrad(FF.D.ga[i]);
+    w.style.transform = el.style.transform;
+    w.style.clipPath = "inset(0 0 100% 0)";
+    return FS.anim(w, [{clipPath: "inset(0 0 100% 0)"}, {clipPath: "inset(0 0 0% 0)"}], {duration: 1400, delay: i * 120, easing: "linear", fill: "forwards"}, null)
+      .then(() => { el.style.backgroundImage = fGrad(FF.D.ga[i]); FS.drop(w); });
+  }));
+}
+
+async function ffMultiply() {
+  await FS.twoThenRest(FF.n, async (i, s) => {
+    const g = FS.ghost(FF.E.G[i]), u = FS.ghost(FF.E.U[i]);
+    const [gx, gy] = ffPos("G", i, 3), [ux, uy] = ffPos("U", i, 3), [hx, hy] = ffPos("Hd", i, 3);
+    const times = FS.el("mx-glyph aexpr", "×");
+    FS.ghosts.add(times);
+    times.style.opacity = 0;
+    await Promise.all([
+      FS.anim(g, [{transform: tr(gx, gy)}, {transform: tr(hx - 14, hy), offset: .75}, {transform: tr(hx, hy), opacity: 0}], {duration: 1000 * s, easing: "cubic-bezier(.4,0,.2,1)"}, null),
+      FS.anim(u, [{transform: tr(ux, uy)}, {transform: tr(hx + 14, hy), offset: .75}, {transform: tr(hx, hy), opacity: 0}], {duration: 1000 * s, easing: "cubic-bezier(.4,0,.2,1)"}, null),
+      FS.anim(times, [{transform: tr(hx - 2, hy + FHH / 2 - 12), opacity: 0}, {transform: tr(hx - 2, hy + FHH / 2 - 12), opacity: 1, offset: .7}, {transform: tr(hx - 2, hy + FHH / 2 - 12), opacity: 0}], {duration: 1000 * s}, null)
+    ]);
+    [g, u, times].forEach(e => FS.drop(e));
+    const h = FF.E.Hd[i];
+    h.style.transition = "none";
+    h.style.opacity = 1;
+    h.style.transform = tr(hx, hy);
+    await FS.anim(h, [{transform: tr(hx, hy, " scale(1.15)")}, {transform: tr(hx, hy)}], {duration: 280 * s}, null);
+    h.style.transition = "";
+  });
+}
+
+async function ffDown() { await FS.twoThenRest(FF.n, (i, s) => ffProject("WD", "R", i, s, "Hd")); }
+
+async function ffAdd() {
+  FF.E.across.style.opacity = 1;
+  await FS.wait(500);
+  await Promise.all(FF.E.R.map((el, i) => {
+    const [x0, y0] = ffPos("R", i, 5), [x1, y1] = ffPos("Run", i, 5), c = FS.ghost(el);
+    return FS.anim(c, [{transform: tr(x0, y0)}, {transform: tr(491, F_RUN_Y), offset: .5}, {transform: tr(x1, y1), opacity: 1, offset: .85}, {transform: tr(x1, y1), opacity: 0}],
+      {duration: 1500, delay: i * 120, easing: "cubic-bezier(.4,0,.2,1)"}, null).then(() => FS.drop(c));
+  }));
+}
+
+function ffGo(step) {
+  const target = (step + F_STEPS.length) % F_STEPS.length;
+  if (FS.busy) { FS.queued = target; FS.fastForward(); return; }
+  const prev = FS.step, forward = target === prev + 1;
+  FS.step = target;
+  ffText();
+  const plan = forward && {1: ffUpGate, 2: ffSilu, 3: ffMultiply, 4: ffDown, 5: ffAdd}[target];
+  if (!plan) { ffLayout(); return; }
+  if (target === 1) ffLayout(["G", "U"]);
+  else if (target === 3) ffLayout(["Hd"]);
+  else if (target === 4) { FS.step = 3; ffLayout(); FS.step = 4; ffLayout(["Hd", "R"]); FF.E.Hd.forEach(h => { h.style.opacity = 1; }); }
+  else if (target === 5) { FS.step = 4; ffLayout(); FS.step = 5; }
+  FS.run(plan, () => {
+    ffLayout();
+    if (FS.queued !== null) { const q = FS.queued; FS.queued = null; ffGo(q); }
+  });
+}
+
+/* ---------- Mixture of experts ---------- */
+const ME = 4, MTOP = 2, MOE_W = 1000, MOE_H = 760;
+const M_ROUTER = [230, 60, FD, ME], M_EX_Y = 300, M_EX_W = 190, M_EX_H = 150, M_EXPR_Y = 520, M_RES_X = 640;
+const MS = new FlowStage("#moe-inner", MOE_W, MOE_H);
+const MOE = {E: null, D: null, key: null};
+const M_COLORS = ["#E8890C", "#2F9E62", "#D6336C", "#3B5BDB"];
+
+const M_STEPS = [
+  {h: "Mixture of experts: the same input", next: "Score the experts",
+    text: "An MoE layer replaces the one feed-forward block with several smaller ones, called experts, plus a small router. Here there are 4 experts and each token uses 2. (Mixtral: 8 experts, 2 per token. DeepSeek-V3: 256 experts, 8 per token, plus one shared expert every token uses.)"},
+  {h: "The router scores every expert for every token", next: "Send tokens to their experts",
+    text: "Each token’s vector goes through the router, a small learned matrix with one column per expert, giving 4 scores. A softmax turns them into probabilities, and the top 2 are picked (outlined). Their two weights are rescaled to add up to 1."},
+  {h: "Each token goes only to its two chosen experts", next: "Combine the expert outputs",
+    text: "A copy of each token’s vector travels to its two experts; the other two never see it. Each expert is a complete feed-forward block of its own (gate, up, SiLU, multiply, down), with its own weights. Different tokens end up at different experts."},
+  {h: "Combine: weight × expert output + weight × expert output", next: "What this buys",
+    text: "Each token’s result is a weighted sum of its two experts’ outputs, using the router’s weights. This replaces the dense feed-forward result, and is added to the running vector in exactly the same way."},
+  {h: "What this buys", next: "Start over",
+    text: "Each expert here is the size of one dense feed-forward block, so the layer holds 4 blocks’ worth of parameters but each token only pays for 2. The bigger the ratio of experts to experts-used, the more knowledge the model can hold for the same cost per token. That ratio is where MoE’s savings come from; attention and the router still run for every token."}
+];
+
+function moeData() {
+  const x = FF.D.x, n = x.length;
+  const Wr = aMat(21, ME, FD).map(row => row.map(w => w * 2.2));
+  const experts = [...Array(ME).keys()].map(e => ({WG: aMat(30 + e, FHID, FD), WU: aMat(40 + e, FHID, FD), WD: aMat(50 + e, FD, FHID)}));
+  const run = (ex, v) => { const g = aMul(ex.WG, v), u = aMul(ex.WU, v); return aMul(ex.WD, g.map((a, j) => silu(a) * u[j])); };
+  const logits = x.map(v => aMul(Wr, v));
+  const probs = logits.map(l => { const m = Math.max(...l), e = l.map(a => Math.exp(a - m)), t = e.reduce((a, b) => a + b, 0); return e.map(a => a / t); });
+  const top = probs.map(p => [...p.keys()].sort((a, b) => p[b] - p[a]).slice(0, MTOP));
+  const wts = probs.map((p, i) => { const t = top[i].reduce((s, e) => s + p[e], 0); return top[i].map(e => p[e] / t); });
+  const outs = x.map((v, i) => top[i].map(e => run(experts[e], v)));
+  const comb = outs.map((o, i) => o[0].map((a, j) => wts[i][0] * a + wts[i][1] * o[1][j]));
+  const load = [...Array(ME).keys()].map(e => top.filter(t => t.includes(e)).length);
+  return {x, probs, top, wts, outs, comb, load, n};
+}
+
+const mExX = e => 120 + e * 215;
+function moePos(kind, i, step) {
+  switch (kind) {
+    case "X": return [30 + i * FCOL, 60, 1];
+    case "Rt": return [M_ROUTER[0] + 50 + i * FCOL, 230, step >= 1 ? 1 : 0];
+    case "C": return [M_RES_X + i * FCOL, M_EXPR_Y, step >= 3 ? 1 : 0];
+  }
+}
+
+function moeLayout(hide = []) {
+  const step = MS.step, {E, D} = MOE;
+  for (let i = 0; i < D.n; i++) {
+    E.X[i].style.backgroundImage = fGrad(D.x[i]);
+    E.Rt[i].style.backgroundImage = aGrad(D.probs[i].map(p => p * 3 - 1.2));
+    E.C[i].style.backgroundImage = fGrad(D.comb[i]);
+    for (const kind of ["X", "Rt", "C"]) {
+      const p = moePos(kind, i, step);
+      if (hide.includes(kind)) p[2] = 0;
+      MS.put(E[kind][i], p);
+    }
+    E.pick[i].forEach((b, k) => MS.put(b, [M_ROUTER[0] + 50 + i * FCOL - 1, 230 + D.top[i][k] * FCELL * 2 - 1, step >= 1 && !hide.includes("pick") ? 1 : 0]));
+  }
+  MS.put(E.router, [M_ROUTER[0], M_ROUTER[1], 1]);
+  E.ex.forEach((b, e) => MS.put(b, [mExX(e), M_EX_Y, 1]));
+  E.tags.forEach((row, e) => row.forEach((t, k) => MS.put(t, [mExX(e) + 8 + (k % 4) * 44, M_EX_Y + 86 + Math.floor(k / 4) * 24, step >= 2 && !hide.includes("tags") ? 1 : 0])));
+  E.counts.forEach((c, e) => { c.textContent = `${D.load[e]} of ${D.n} tokens`; MS.put(c, [mExX(e) + 8, M_EX_Y + M_EX_H + 6, step >= 4 ? 1 : 0]); });
+  const L = E.lbl, show = (el, x, y, on) => MS.put(el, [x, y, on ? 1 : 0]);
+  show(L.x, 30, 38, true);
+  L.tokX.forEach((el, i) => show(el, 26 + i * FCOL, 192, true));
+  show(L.rt, M_ROUTER[0] + 50, 208, step >= 1);
+  show(L.c, M_RES_X, M_EXPR_Y - 22, step >= 3);
+  show(L.sum, 30, 690, step >= 4);
+}
+
+function moeBuild() {
+  MOE.key = FF.key;
+  MOE.D = moeData();
+  MS.reset();
+  const D = MOE.D, E = MOE.E = {lbl: {}}, tokLabel = id => esc(bytesLabel(EMB.tk.vocab[id]));
+  E.router = MS.el("amat fmat", "<b>W_router</b>", `width:${ME * FCELL * 2}px;height:${FD * FCELL}px;background-color:#596378;background-size:16px 8px`);
+  E.ex = M_COLORS.map((c, e) => MS.el("mex", `<b style="color:${c}">Expert ${e + 1}</b><div class="mex-m"><i style="background:#0E9AA7"></i><i style="background:#3B5BDB"></i><i style="background:#8A4FD1"></i></div><span>gate · up · down</span>`, `--ec:${c};width:${M_EX_W}px;height:${M_EX_H}px`));
+  E.X = FF.ids.map(() => MS.el("avec bx", "", `height:${FXH}px`));
+  E.Rt = FF.ids.map(() => MS.el("avec bx", "", `height:${ME * FCELL * 2}px`));
+  E.pick = FF.ids.map(() => [0, 1].map(() => MS.el("mpick")));
+  E.C = FF.ids.map(() => MS.el("avec bo", "", `height:${FXH}px`));
+  E.tags = [...Array(ME).keys()].map(e => FF.ids.filter((_, i) => D.top[i].includes(e)).map(id => MS.el("albl mtag", tokLabel(id))));
+  E.tagIndex = [...Array(ME).keys()].map(e => FF.ids.map((_, i) => i).filter(i => D.top[i].includes(e)));
+  E.counts = [...Array(ME).keys()].map(() => MS.el("albl"));
+  const lbl = t => MS.el("albl", t);
+  E.lbl = {x: lbl("normalised x (16)"), rt: lbl("router: one score per expert"), c: lbl("combined result (16)"),
+    tokX: FF.ids.map(id => MS.el("albl atl", tokLabel(id))),
+    sum: MS.el("albl msum", `4 experts × one feed-forward block each = 4 blocks of parameters stored. Each token uses 2 of them, so it costs as much as 2 blocks. DeepSeek-V3 stores 671 billion parameters but runs about 37 billion per token.`)};
+  MS.step = 0;
+  MS.inner.classList.add("live");
+  moeText();
+  moeLayout();
+  void MS.inner.offsetHeight;
+  MS.inner.classList.remove("live");
+  MS.scale("#moe-stage");
+}
+
+function moeText() {
+  const s = M_STEPS[MS.step];
+  $("#moe-stepno").textContent = `Step ${MS.step + 1} of ${M_STEPS.length}`;
+  $("#moe-h").textContent = s.h;
+  $("#moe-text").textContent = s.text;
+  $("#moe-next").textContent = s.next;
+  $("#moe-back").disabled = MS.step === 0;
+}
+
+async function moeRoute() {
+  const [mx, my, rows, cols] = M_ROUTER, mh = rows * FCELL, mw = cols * FCELL * 2;
+  await MS.twoThenRest(MOE.D.n, async (i, s) => {
+    const c = MS.ghost(MOE.E.X[i]), [sx, sy] = moePos("X", i, 1);
+    await MS.anim(c, [{transform: tr(sx, sy)}, {transform: tr(mx - 22, my)}], {duration: 560 * s, easing: "cubic-bezier(.4,0,.2,1)"}, tr(mx - 22, my));
+    await MS.anim(c, [{transform: tr(mx - 22, my)}, {transform: tr(mx - 8, my, " scaleX(0)")}], {duration: 200 * s}, null);
+    MS.drop(c);
+    const out = MOE.E.Rt[i], [tx, ty] = moePos("Rt", i, 1);
+    out.style.transition = "none";
+    out.style.opacity = 1;
+    await MS.anim(out, aSwivel(ACW, ME * FCELL * 2, mw / 2, mx, my, mh, tx, ty), {duration: 1100 * s, easing: "ease-in-out"}, tr(tx, ty));
+    out.style.transition = "";
+    MOE.E.pick[i].forEach(b => { b.style.opacity = 1; });
+  });
+}
+
+async function moeDispatch() {
+  const D = MOE.D, E = MOE.E;
+  await MS.twoThenRest(D.n, async (i, s) => {
+    await Promise.all(D.top[i].map(async (e, k) => {
+      const c = MS.ghost(E.X[i]), [sx, sy] = moePos("X", i, 2), tx = mExX(e) + M_EX_W / 2 - 8, ty = M_EX_Y + 20;
+      c.style.borderColor = M_COLORS[e];
+      await MS.anim(c, [{transform: aT(sx, sy)}, {transform: aT(tx, ty - 40, .5), offset: .8}, {transform: aT(tx, ty, .3), opacity: 0}], {duration: 1000 * s, delay: k * 120 * s, easing: "cubic-bezier(.4,0,.2,1)"}, null);
+      MS.drop(c);
+      MS.anim(E.ex[e], [{boxShadow: "0 0 0 0 transparent"}, {boxShadow: `0 0 0 5px ${M_COLORS[e]}`}, {boxShadow: "0 0 0 0 transparent"}], {duration: 420 * s}, null);
+      const tag = E.tags[e][E.tagIndex[e].indexOf(i)];
+      tag.style.opacity = 1;
+    }));
+  });
+}
+
+async function moeCombine() {
+  const D = MOE.D, E = MOE.E;
+  let exprEls = [];
+  const clear = () => { exprEls.forEach(el => el.remove()); exprEls = []; };
+  await MS.twoThenRest(D.n, async (i, s) => {
+    const fast = s < .5;
+    if (!fast) clear();
+    const y = M_EXPR_Y + (fast ? 0 : 0), base = 30, items = [];
+    const head = MS.el("albl mexpr-t", `${esc(bytesLabel(EMB.tk.vocab[FF.ids[i]]))}:`);
+    head.style.transform = tr(base, y + 50);
+    head.style.opacity = fast ? 0 : 1;
+    exprEls.push(head);
+    await Promise.all(D.top[i].map(async (e, k) => {
+      const x0 = base + 70 + k * 150;
+      const w = MS.el("agc", "", `background-color:hsl(345 62% ${(22 + 68 * D.wts[i][k]).toFixed(1)}%)`);
+      const v = MS.el("avec bo", "", `height:${FXH}px;border-color:${M_COLORS[e]}`);
+      v.style.backgroundImage = fGrad(D.outs[i][k]);
+      const times = MS.el("mx-glyph aexpr", "×"), plus = k === 0 ? MS.el("mx-glyph aexpr", "+") : null;
+      [w, v, times, plus].filter(Boolean).forEach(el => { el.style.transition = "none"; exprEls.push(el); if (fast) el.style.opacity = 0; });
+      const vT = aT(x0 + 50, y, .6), from = aT(mExX(e) + M_EX_W / 2 - 8, M_EX_Y + 30, .3);
+      w.style.transform = tr(x0, y + 26);
+      times.style.transform = tr(x0 + 28, y + 26);
+      if (plus) plus.style.transform = tr(x0 + 100, y + 26);
+      if (fast) return;
+      await MS.anim(v, [{transform: from, opacity: 0}, {transform: vT, opacity: 1}], {duration: 900 * s, delay: k * 150 * s, easing: "cubic-bezier(.4,0,.2,1)"}, vT);
+    }));
+    const eq = MS.el("mx-glyph aexpr", "="), resT = aT(base + 70 + 2 * 150, M_EXPR_Y, .6);
+    eq.style.transform = tr(base + 70 + 2 * 150 - 32, y + 26);
+    exprEls.push(eq);
+    if (fast) eq.style.opacity = 0;
+    const c = E.C[i], [cx, cy] = moePos("C", i, 3);
+    c.style.transition = "none";
+    c.style.opacity = 1;
+    if (fast) { c.style.transform = tr(cx, cy); }
+    else {
+      c.style.transform = resT;
+      await MS.anim(c, [{transform: resT.replace("scale(0.6)", "scale(0.9)")}, {transform: resT}], {duration: 300 * s}, resT);
+      const kept = MS.ghost(c);
+      MS.ghosts.delete(kept);
+      kept.style.transform = resT;
+      exprEls.push(kept);
+      await MS.wait(350 * s);
+      await MS.anim(c, [{transform: resT}, {transform: tr(cx, cy)}], {duration: 800 * s, easing: "cubic-bezier(.4,0,.2,1)"}, tr(cx, cy));
+    }
+    c.style.transition = "";
+  });
+  MOE.exprEls = exprEls;
+}
+
+function moeGo(step) {
+  const target = (step + M_STEPS.length) % M_STEPS.length;
+  if (MS.busy) { MS.queued = target; MS.fastForward(); return; }
+  const prev = MS.step, forward = target === prev + 1;
+  MS.step = target;
+  moeText();
+  if (target < 3 && MOE.exprEls) { MOE.exprEls.forEach(el => el.remove()); MOE.exprEls = null; }
+  const plan = forward && {1: moeRoute, 2: moeDispatch, 3: moeCombine}[target];
+  if (!plan) { moeLayout(); return; }
+  if (target === 1) moeLayout(["Rt", "pick"]);
+  else if (target === 2) moeLayout(["tags"]);
+  else if (target === 3) moeLayout(["C"]);
+  MS.run(plan, () => {
+    moeLayout();
+    if (MS.queued !== null) { const q = MS.queued; MS.queued = null; moeGo(q); }
+  });
+}
+
+function ffShow() {
+  const key = ffEnsureData();
+  if (FF.key !== key || !FF.E) ffBuild(); else FS.scale("#ff-stage");
+  if (MOE.key !== FF.key || !MOE.E) moeBuild(); else MS.scale("#moe-stage");
+}
+
+const NT_W = 1000, NT_H = 720, NT_TOP = 12;
+const NT_M = [480, 60, 480, FD * FCELL];
+const NTS = new FlowStage("#nt-inner", NT_W, NT_H);
+const NT = {E: null, D: null, key: null, T: 1, k: 50, p: 0.9, pick: null, rnd: Math.random()};
+
+const NT_STEPS = [
+  {h: "The vectors after the last layer", next: "Final normalisation",
+    text: "Picture the layer from chapters 3 to 6 repeated many times: 32 layers in Llama 3 8B, each with its own weights. These are the running vectors coming out of the very last one."},
+  {h: "Final normalisation", next: "Take the last position",
+    text: "One more RMSNorm: the same slide-onto-a-sphere and stretch as in chapter 3, with its own learned scale."},
+  {h: "Only the last position matters", next: "Unembed",
+    text: "To predict what comes next, only the vector at the last position is used: it’s the only one that has seen every token. (In training, every position predicts its own next token at once.)"},
+  {h: "Unembed: one score per vocabulary token", next: "Show the top scores",
+    text: "The vector goes into a matrix with one column for every token in the vocabulary: 16 × 285 here, 4,096 × 128,256 in Llama 3. Each of the 285 numbers that comes out is a score, or logit, for how strongly the model favours that token next. Here the matrix is the embedding table reused, which many models do."},
+  {h: "The highest scores", next: "Temperature and softmax",
+    text: "The 12 highest of the 285 scores lift out as bars. With the random weights in this demo the ranking is meaningless, which is why odd byte tokens like ‹f3› can win; a trained model ranks sensible continuations at the top."},
+  {h: "Temperature, then softmax", next: "Trim the tail",
+    text: "Every score is divided by the temperature, then softmax turns them into probabilities that add up to 1. Drag the temperature slider: below 1 sharpens the distribution, above 1 flattens it."},
+  {h: "Trim the unlikely tail", next: "Draw the next token",
+    text: "Top-k keeps only the k most likely tokens; top-p keeps the smallest set whose probabilities add up to p. Trimmed tokens are hatched, and the survivors are rescaled to add up to 1 again. Try the sliders."},
+  {h: "Draw the next token", next: "Append it and go again",
+    text: "A random number picks a point along the strip, where each surviving token owns a slice as wide as its probability. Press “Draw again” to resample. Taking the top token every time instead is called greedy decoding."},
+  {h: "Append it, and run again", next: "Start over",
+    text: "The chosen token is added to the end of the text, and the whole model runs once more for just this one new token, reusing every layer’s cached keys and values. This repeats until the model produces an end-of-text token or hits a length limit."}
+];
+
+function ntData() {
+  const run = FF.D.out, n = run.length;
+  const xn = run.map(v => { const rms = Math.sqrt(v.reduce((t, a) => t + a * a, 0) / FD); return v.map(a => a / rms); });
+  const last = xn[n - 1], V = EMB.tk.vocab.length;
+  const logits = Array.from({length: V}, (_, id) => last.reduce((t, a, r) => t + a * embVal(id, r), 0));
+  const order = [...logits.keys()].sort((a, b) => logits[b] - logits[a]);
+  return {run, xn, n, V, logits, order};
+}
+
+function ntProbs() {
+  const {logits, order} = NT.D, T = Math.max(.05, NT.T);
+  const m = logits[order[0]], e = order.map(id => Math.exp((logits[id] - m) / T)), tot = e.reduce((a, b) => a + b, 0);
+  const p = e.map(a => a / tot);
+  let keep = 0, cum = 0;
+  for (let k = 0; k < p.length; k++) { if (k >= NT.k) break; keep = k + 1; cum += p[k]; if (cum >= NT.p) break; }
+  const kt = p.slice(0, keep).reduce((a, b) => a + b, 0);
+  const pk = p.map((a, k) => k < keep ? a / kt : 0);
+  return {p, pk, keep};
+}
+
+function ntPos(kind, i) {
+  switch (kind) {
+    case "Run": return [30 + i * FCOL, 60, 1];
+    case "N": return i === NT.D.n - 1 && NTS.step >= 2 ? [440, 60, 1] : [270 + i * FCOL, 60, NTS.step >= 1 ? 1 : 0];
+  }
+}
+
+function ntRender() {
+  const step = NTS.step, {E, D} = NT, {p, pk, keep} = ntProbs();
+  for (let i = 0; i < D.n; i++) {
+    E.Run[i].style.backgroundImage = fGrad(D.run[i]);
+    E.N[i].style.backgroundImage = fGrad(D.xn[i]);
+    NTS.put(E.Run[i], ntPos("Run", i));
+    NTS.put(E.N[i], ntPos("N", i));
+  }
+  E.N[D.n - 1].classList.toggle("ntlast", step >= 2);
+  NTS.put(E.mat, [NT_M[0], NT_M[1], 1]);
+  NTS.put(E.ribbon, [NT_M[0], NT_M[1] + NT_M[3] + 8, step >= 3 ? 1 : 0]);
+  const top = D.order.slice(0, NT_TOP), lo = D.logits[top[NT_TOP - 1]], hi = D.logits[top[0]];
+  const maxP = Math.max(...(step >= 6 ? pk : p).slice(0, NT_TOP));
+  top.forEach((id, k) => {
+    const b = E.bars[k], probs = step >= 6 ? pk : p, val = probs[k];
+    const h = step >= 5 ? 8 + 200 * val / maxP : 20 + 180 * (D.logits[id] - lo) / Math.max(1e-6, hi - lo);
+    b.bar.style.height = h + "px";
+    b.bar.classList.toggle("trim", step >= 6 && k >= keep);
+    b.bar.classList.toggle("chosen", step >= 7 && NT.pick === k);
+    b.val.textContent = step >= 5 ? (val * 100 < 1 && val > 0 ? "<1%" : Math.round(val * 100) + "%") : D.logits[id].toFixed(1);
+    b.val.style.bottom = h + 4 + "px";
+    NTS.put(b.wrap, [70 + k * 74, 290, step >= 4 ? 1 : 0], step === 4 ? k * 60 : 0);
+  });
+  E.tail.style.opacity = step >= 4 ? 1 : 0;
+  E.tail.textContent = step >= 6 ? `…the other ${D.V - NT_TOP} tokens: ${keep > NT_TOP ? `${keep - NT_TOP} more kept, the rest trimmed` : "all trimmed"}` : `…and ${D.V - NT_TOP} lower scores`;
+  NTS.put(E.tail, [70, 560, step >= 4 ? 1 : 0]);
+  let x = 0;
+  E.strip.innerHTML = pk.slice(0, keep).map((v, k) => {
+    const id = D.order[k], w = v * 860, seg = `<i style="left:${x}px;width:${Math.max(w - 1, 1)}px;background:hsl(345 55% ${k % 2 ? 72 : 62}%)" title="${esc(bytesLabel(EMB.tk.vocab[id]))}">${w > 34 ? esc(bytesLabel(EMB.tk.vocab[id])) : ""}</i>`;
+    x += w;
+    return seg;
+  }).join("");
+  NTS.put(E.strip, [70, 610, step >= 7 ? 1 : 0]);
+  NTS.put(E.pointer, [70 + ntPointerX(pk, keep), 588, step >= 7 && NT.pick !== null ? 1 : 0]);
+  const L = E.lbl, show = (el, xx, y, on) => NTS.put(el, [xx, y, on ? 1 : 0]);
+  show(L.run, 30, 38, true);
+  L.tok.forEach((el, i) => show(el, 26 + i * FCOL, 192, true));
+  show(L.norm, 270, 38, step >= 1);
+  show(L.last, 424, 196, step >= 2);
+  NTS.put(E.normArrow, [0, 0, 1]);
+  show(L.rib, NT_M[0], NT_M[1] + NT_M[3] + 28, step >= 3);
+  show(L.next, 26 + D.n * FCOL, 192, step >= 8);
+  L.next.innerHTML = NT.pick !== null ? esc(bytesLabel(EMB.tk.vocab[D.order[NT.pick]])) : "";
+  $("#nt-temp").disabled = step < 5;
+  $("#nt-k").disabled = $("#nt-p").disabled = step < 6;
+  $("#nt-draw").hidden = step < 7;
+  $("#nt-temp-v").textContent = NT.T.toFixed(2);
+  $("#nt-k-v").textContent = NT.k;
+  $("#nt-p-v").textContent = NT.p.toFixed(2);
+}
+
+function ntPointerX(pk, keep) {
+  if (NT.pick === null) return 0;
+  let x = 0;
+  for (let k = 0; k < NT.pick; k++) x += pk[k] * 860;
+  return x + pk[NT.pick] * 860 * NT.frac;
+}
+
+function ntSample() {
+  const {pk, keep} = ntProbs();
+  const u = Math.random();
+  let cum = 0;
+  for (let k = 0; k < keep; k++) {
+    cum += pk[k];
+    if (u <= cum || k === keep - 1) { NT.pick = k; NT.frac = Math.min(.95, Math.max(.05, 1 - (cum - u) / pk[k])); return; }
+  }
+}
+
+function ntBuild() {
+  NT.key = FF.key;
+  NT.D = ntData();
+  NTS.reset();
+  const D = NT.D, E = NT.E = {lbl: {}}, tokLabel = id => esc(bytesLabel(EMB.tk.vocab[id]));
+  E.Run = FF.ids.map(() => NTS.el("avec bh", "", `height:${FXH}px`));
+  E.N = FF.ids.map(() => NTS.el("avec bx", "", `height:${FXH}px`));
+  E.normArrow = NTS.el("aarrow", `<svg width="${NT_W}" height="${NT_H}" aria-hidden="true"><defs><marker id="nt-r" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" style="fill:var(--ink)"/></marker></defs><path d="M188 124 L262 124" fill="none" style="stroke:var(--ink)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#nt-r)"/>${sphereIcon(224, 124, 14, "nt-sph")}</svg>`);
+  E.mat = NTS.el("amat fmat", "<b>W_unembed</b>", `width:${NT_M[2]}px;height:${NT_M[3]}px;background-color:#B0577A`);
+  const lo = D.logits[D.order[D.V - 1]], hi = D.logits[D.order[0]];
+  E.ribbon = NTS.el("ntrib", "", `width:${NT_M[2]}px;background-image:linear-gradient(90deg,${D.logits.map((l, id) => `${aLight((l - (lo + hi) / 2) / ((hi - lo) / 4))} ${(id / D.V * 100).toFixed(3)}% ${((id + 1) / D.V * 100).toFixed(3)}%`).join(",")})`);
+  E.bars = D.order.slice(0, NT_TOP).map(id => {
+    const wrap = NTS.el("ntbar");
+    wrap.innerHTML = `<div class="ntb" style="--h:${embHue(id)}"></div><div class="ntv"></div><div class="ntl">${tokLabel(id)}</div>`;
+    return {wrap, bar: wrap.children[0], val: wrap.children[1]};
+  });
+  E.tail = NTS.el("albl");
+  E.strip = NTS.el("ntstrip");
+  E.pointer = NTS.el("ntptr", "▼");
+  const lbl = t => NTS.el("albl", t);
+  E.lbl = {run: lbl("after the last layer"), tok: FF.ids.map(id => NTS.el("albl atl", tokLabel(id))),
+    norm: lbl("normalised (RMSNorm)"), last: lbl("last position"), rib: lbl(`${D.V} scores, one per vocabulary token (bright = high)`),
+    next: NTS.el("albl atl ntnext", "")};
+  NTS.step = 0;
+  NT.pick = null;
+  NTS.inner.classList.add("live");
+  ntText();
+  ntRender();
+  void NTS.inner.offsetHeight;
+  NTS.inner.classList.remove("live");
+  NTS.scale("#nt-stage");
+}
+
+function ntText() {
+  const s = NT_STEPS[NTS.step];
+  $("#nt-stepno").textContent = `Step ${NTS.step + 1} of ${NT_STEPS.length}`;
+  $("#nt-h").textContent = s.h;
+  $("#nt-text").textContent = s.text;
+  $("#nt-next").textContent = s.next;
+  $("#nt-back").disabled = NTS.step === 0;
+}
+
+async function ntNormalise() {
+  await NTS.twoThenRest(NT.D.n, async (i, s) => {
+    const c = NTS.ghost(NT.E.Run[i]), [sx, sy] = ntPos("Run", i), [tx, ty] = ntPos("N", i);
+    await NTS.anim(c, [{transform: tr(sx, sy)}, {transform: tr(tx, ty)}], {duration: 800 * s, easing: "cubic-bezier(.4,0,.2,1)"}, tr(tx, ty));
+    NTS.drop(c);
+    const n = NT.E.N[i];
+    n.style.transition = "none";
+    n.style.opacity = 1;
+    n.style.transform = tr(tx, ty);
+    await NTS.anim(n, [{transform: tr(tx, ty, " scale(1.12)")}, {transform: tr(tx, ty)}], {duration: 260 * s}, null);
+    n.style.transition = "";
+  });
+}
+
+async function ntUnembed() {
+  const el = NT.E.N[NT.D.n - 1], [mx, my] = NT_M;
+  el.style.transition = "none";
+  await NTS.anim(el, [{transform: tr(440, 60)}, {transform: tr(mx - 22, my)}], {duration: 500, easing: "cubic-bezier(.4,0,.2,1)"}, tr(mx - 22, my));
+  const g = NTS.ghost(el);
+  el.style.transform = tr(440, 60);
+  el.style.transition = "";
+  await NTS.anim(g, [{transform: tr(mx - 22, my)}, {transform: tr(mx - 8, my, " scaleX(0)")}], {duration: 220}, null);
+  NTS.drop(g);
+  NTS.anim(NT.E.mat, [{boxShadow: "0 0 0 0 transparent"}, {boxShadow: "0 0 0 5px var(--ink)"}, {boxShadow: "0 0 0 0 transparent"}], {duration: 400}, null);
+  const r = NT.E.ribbon;
+  r.style.transition = "none";
+  r.style.opacity = 1;
+  r.style.transform = tr(mx, my + NT_M[3] + 8);
+  await NTS.anim(r, [{clipPath: "inset(0 100% 0 0)"}, {clipPath: "inset(0 0 0 0)"}], {duration: 1400, easing: "linear"}, null);
+  r.style.transition = "";
+}
+
+async function ntLift() {
+  const D = NT.D, [mx, my] = NT_M, ry = my + NT_M[3] + 8, cw = NT_M[2] / D.V;
+  await Promise.all(D.order.slice(0, NT_TOP).map((id, k) => {
+    const g = NTS.el("ntlift");
+    NTS.ghosts.add(g);
+    g.style.transition = "none";
+    g.style.background = "hsl(345 55% 60%)";
+    return NTS.anim(g, [{transform: tr(mx + id * cw - 4, ry), opacity: 1}, {transform: tr(70 + k * 74 + 12, 480), opacity: 1}], {duration: 900, delay: k * 70, easing: "cubic-bezier(.4,0,.2,1)"}, null).then(() => NTS.drop(g));
+  }));
+}
+
+async function ntDraw(first) {
+  ntSample();
+  const {pk, keep} = ntProbs(), target = ntPointerX(pk, keep), ptr = NT.E.pointer;
+  ntRender();
+  ptr.style.transition = "none";
+  ptr.style.opacity = 1;
+  await NTS.anim(ptr, [{transform: tr(70, 588)}, {transform: tr(930, 588), offset: .35}, {transform: tr(70, 588), offset: .65}, {transform: tr(70 + target, 588)}], {duration: first ? 1600 : 1000, easing: "cubic-bezier(.3,.6,.3,1)"}, tr(70 + target, 588));
+  ptr.style.transition = "";
+}
+
+async function ntAppend() {
+  const k = NT.pick, from = [70 + k * 74 + 6, 518], to = [26 + NT.D.n * FCOL, 192], L = NT.E.lbl.next;
+  L.innerHTML = esc(bytesLabel(EMB.tk.vocab[NT.D.order[k]]));
+  L.style.transition = "none";
+  L.style.opacity = 1;
+  await NTS.anim(L, [{transform: tr(...from, " scale(1.6)")}, {transform: tr(...to)}], {duration: 1200, easing: "cubic-bezier(.4,0,.2,1)"}, tr(...to));
+  L.style.transition = "";
+}
+
+function ntGo(step) {
+  const target = (step + NT_STEPS.length) % NT_STEPS.length;
+  if (NTS.busy) { NTS.queued = target; NTS.fastForward(); return; }
+  const prev = NTS.step, forward = target === prev + 1;
+  NTS.step = target;
+  if (target === 0) NT.pick = null;
+  ntText();
+  const plan = forward && {1: ntNormalise, 3: ntUnembed, 4: ntLift, 7: () => ntDraw(true), 8: ntAppend}[target];
+  if (target === 7 && NT.pick === null && !plan) ntSample();
+  if (!plan) { ntRender(); return; }
+  if (target === 1) { NTS.step = 0; ntRender(); NTS.step = 1; }
+  else if (target === 3) { NTS.step = 2; ntRender(); NTS.step = 3; }
+  else if (target === 4) { NTS.step = 3; ntRender(); NTS.step = 4; }
+  else if (target === 8) { NTS.step = 7; ntRender(); NTS.step = 8; }
+  NTS.run(plan, () => {
+    ntRender();
+    if (NTS.queued !== null) { const q = NTS.queued; NTS.queued = null; ntGo(q); }
+  });
+}
+
+function ntShow() {
+  ffShow();
+  if (NT.key !== FF.key || !NT.E) ntBuild(); else NTS.scale("#nt-stage");
+}
+
+const STOPS = {
+  "sec-tok": () => {},
+  "sec-emb": () => embShow(),
+  "sec-norm": () => n3Show(),
+  "sec-rope": () => mxShow(),
+  "sec-rope-play": () => renderRope(),
+  "sec-att": () => avShow(),
+  "sec-ffn": () => ffShow(),
+  "sec-moe": () => ffShow(),
+  "sec-next": () => ntShow()
+};
+const VISIBLE = new Set();
+
+const SNAP = {start: 0, last: 0, moving: false, auto: false, idle: 0};
+
+function goToStop(id, smooth = true) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  SNAP.auto = true;
+  el.scrollIntoView({behavior: smooth && !reduceMotion ? "smooth" : "auto", block: "start"});
+}
+
+const stopTops = () => Object.keys(STOPS).map(id => Math.round(document.getElementById(id).getBoundingClientRect().top + scrollY));
+
+function settleScroll() {
+  const y = scrollY, reach = innerHeight * 0.3, from = SNAP.start, tops = stopTops();
+  let target;
+  if (y > from + 2) target = tops.find(t => t > from + 2 && t <= y + reach);
+  else if (y < from - 2) target = [...tops].reverse().find(t => t < from - 2 && t >= y - reach);
+  if (target === undefined || Math.abs(target - y) <= 2) return;
+  SNAP.auto = true;
+  scrollTo({top: target, behavior: reduceMotion ? "auto" : "smooth"});
+}
+
+function onScrollSnap() {
+  if (!SNAP.auto && !SNAP.moving) { SNAP.moving = true; SNAP.start = SNAP.last; }
+  clearTimeout(SNAP.idle);
+  SNAP.idle = setTimeout(() => {
+    SNAP.moving = false;
+    SNAP.last = scrollY;
+    if (SNAP.auto) SNAP.auto = false; else settleScroll();
+  }, 160);
+}
+
+function markActive() {
+  const line = innerHeight * 0.35;
+  let current = Object.keys(STOPS)[0];
+  for (const id of Object.keys(STOPS)) if (document.getElementById(id).getBoundingClientRect().top <= line) current = id;
+  document.querySelectorAll("#rail a").forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#" + current));
+}
+
+function initStops() {
+  const io = new IntersectionObserver(entries => entries.forEach(e => {
+    if (e.isIntersecting) { VISIBLE.add(e.target.id); STOPS[e.target.id](); }
+    else VISIBLE.delete(e.target.id);
+  }), {rootMargin: "400px 0px"});
+  Object.keys(STOPS).forEach(id => io.observe(document.getElementById(id)));
+  let ticking = false;
+  addEventListener("scroll", onScrollSnap, {passive: true});
+  addEventListener("scroll", () => { if (!ticking) { ticking = true; requestAnimationFrame(() => { ticking = false; markActive(); }); } }, {passive: true});
+  const rail = $("#rail");
+  rail.addEventListener("click", e => {
+    const a = e.target.closest("a");
+    if (!a) { rail.classList.toggle("open"); return; }
+    e.preventDefault();
+    rail.classList.remove("open");
+    goToStop(a.getAttribute("href").slice(1));
+  });
+  const legacy = {tokenizer: "sec-tok", embeddings: "sec-emb", normalization: "sec-norm", rope: "sec-rope", attention: "sec-att", ffn: "sec-ffn", next: "sec-next"};
+  const h = location.hash.slice(1), target = STOPS[h] ? h : legacy[h];
+  if (target) requestAnimationFrame(() => goToStop(target, false));
+  markActive();
+}
+
+
+mxBuild();
+$("#mx-next").onclick = () => mxGo(MX.step + 1);
+$("#mx-back").onclick = () => mxGo(MX.step - 1);
+$("#mx-m").oninput = e => { MX.m = +e.target.value; mxText(); mxLayout(); };
+$("#mx-n").oninput = e => { MX.n = +e.target.value; mxText(); mxLayout(); };
+addEventListener("resize", () => {
+  if (MX.shown) mxScale();
+  if (AV.E) avScale();
+  if (NT.E) NTS.scale("#nt-stage");
+  if (FF.E) FS.scale("#ff-stage");
+  if (MOE.E) MS.scale("#moe-stage");
+  if (EMB.E) embScale();
+});
+$("#emb-text").value = EMB.sentence;
+$("#emb-play").onclick = embRun;
+$("#av-next").onclick = () => avGo(AV.step + 1);
+$("#ff-next").onclick = () => ffGo(FS.step + 1);
+$("#nt-next").onclick = () => ntGo(NTS.step + 1);
+$("#nt-back").onclick = () => ntGo(NTS.step - 1);
+$("#nt-draw").onclick = () => { if (!NTS.busy) NTS.run(() => ntDraw(false), ntRender); };
+$("#nt-temp").oninput = e => { NT.T = +e.target.value; ntRender(); };
+$("#nt-k").oninput = e => { NT.k = +e.target.value; ntRender(); };
+$("#nt-p").oninput = e => { NT.p = +e.target.value; ntRender(); };
+$("#ff-back").onclick = () => ffGo(FS.step - 1);
+$("#moe-next").onclick = () => moeGo(MS.step + 1);
+$("#moe-back").onclick = () => moeGo(MS.step - 1);
+$("#av-back").onclick = () => avGo(AV.step - 1);
+n3Bind();
+$("#emb-reset").onclick = () => { if (!EMB.running) embBuild(); };
+$("#emb-use").onclick = () => { if (EMB.running) return; EMB.sentence = $("#emb-text").value.trim() || "The cat sat on the mat."; embBuild(); };
+$("#emb-text").onkeydown = e => { if (e.key === "Enter") $("#emb-use").click(); };
+["rope-m", "rope-n", "rope-s"].forEach(id => $("#" + id).oninput = renderRope);
+document.querySelectorAll("[data-rope]").forEach(b => b.onclick = () => ropePreset(b.dataset.rope));
+ropePreset("random");
+init();
+renderView();
+initStops();
+</script>
+</body>
+</html>
